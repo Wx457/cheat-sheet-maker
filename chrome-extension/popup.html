@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    /* 全局样式：保持插件的小巧风格 */
+    body {
+      width: 380px; /* 稍微宽一点，容纳横排选项 */
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      color: #333;
+      background-color: #fff;
+    }
+
+    h3 {
+      margin: 0 0 16px 0;
+      font-size: 18px;
+      color: #1a73e8; /* Chrome 蓝 */
+      text-align: center;
+    }
+
+    /* 表单组通用样式 */
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    label.section-title {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: #5f6368;
+    }
+
+    /* 文本输入框样式 */
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      box-sizing: border-box; /* 确保 padding 不撑大宽度 */
+      font-family: inherit;
+      resize: none; /* 禁止手动拖动大小，保持布局稳定 */
+    }
+
+    input[type="text"]:focus, textarea:focus {
+      border-color: #1a73e8;
+      outline: none;
+    }
+
+    /* 单选按钮组容器：使用 Flex 实现横排 */
+    .radio-group {
+      display: flex;
+      flex-wrap: wrap; /* 如果放不下会自动换行 */
+      gap: 12px; /* 选项之间的间距 */
+    }
+
+    /* 单个单选选项 */
+    .radio-label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .radio-label input {
+      margin-right: 6px;
+      cursor: pointer;
+    }
+
+    /* 按钮组 */
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    button {
+      flex: 1;
+      padding: 10px 0;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background-color 0.2s;
+    }
+
+    .secondary-btn {
+      background-color: #f1f3f4;
+      color: #1a73e8;
+    }
+    .secondary-btn:hover {
+      background-color: #e8eaed;
+    }
+
+    .primary-btn {
+      background-color: #1a73e8;
+      color: white;
+    }
+    .primary-btn:hover {
+      background-color: #1557b0;
+    }
+
+    /* 状态信息 */
+    .status-msg {
+      margin-top: 12px;
+      font-size: 12px;
+      text-align: center;
+      min-height: 1.5em; /* 占位，防止文字出现时跳动 */
+      padding: 8px;
+      border-radius: 4px;
+    }
+    
+    .status-msg.loading {
+      background-color: #e8f0fe;
+      color: #1a73e8;
+    }
+    
+    .status-msg.success {
+      background-color: #d1fae5;
+      color: #065f46;
+    }
+    
+    .status-msg.error {
+      background-color: #fee2e2;
+      color: #991b1b;
+    }
+    
+    /* 链接区域 */
+    #resultArea {
+      margin-top: 10px;
+      text-align: center;
+      padding: 8px;
+      background-color: #e8f0fe;
+      border-radius: 4px;
+    }
+    #resultArea a {
+      color: #1a73e8;
+      text-decoration: none;
+      font-weight: bold;
+    }
+
+    /* 大纲视图样式 */
+    #view-outline h4 {
+      margin: 0 0 16px 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a73e8;
+    }
+
+    #outline-list {
+      margin-bottom: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    /* 复选框列表项样式 */
+    .outline-item {
+      display: flex;
+      align-items: center;
+      padding: 8px;
+      margin-bottom: 8px;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .outline-item:hover {
+      background-color: #e8eaed;
+    }
+
+    .outline-item input[type="checkbox"] {
+      margin-right: 10px;
+      cursor: pointer;
+    }
+
+    .outline-item label {
+      flex: 1;
+      cursor: pointer;
+      font-size: 13px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h3>Cheat Sheet Maker</h3>
+
+  <!-- 表单视图 -->
+  <div id="view-form">
+    <div class="form-group">
+      <label class="section-title" for="courseName">课程名称</label>
+      <input type="text" id="courseName" placeholder="例如: Machine Learning CS229" />
+    </div>
+
+    <div class="form-group">
+      <label class="section-title">学习层次</label>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="educationLevel" value="Undergraduate" checked> 本科
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="educationLevel" value="Graduate"> 研究生
+        </label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="section-title">考试类型</label>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="examType" value="Quiz"> Quiz
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="examType" value="Midterm"> Midterm
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="examType" value="Final" checked> Final
+        </label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="section-title">小抄页面限制</label>
+      <div class="radio-group">
+        <label class="radio-label"><input type="radio" name="pageLimit" value="1 side"> 1 Side</label>
+        <label class="radio-label"><input type="radio" name="pageLimit" value="1 page"> 1 Page</label>
+        <label class="radio-label"><input type="radio" name="pageLimit" value="2 pages"> 2 Pages</label>
+        <label class="radio-label"><input type="radio" name="pageLimit" value="Unlimited" checked> No Limit</label>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="section-title" for="syllabusInput">考试大纲 / 过滤指令 (可选)</label>
+      <textarea id="syllabusInput" rows="3" placeholder="在此粘贴考纲，AI 将优先提取相关内容..."></textarea>
+    </div>
+
+    <div class="button-group">
+      <button id="btnSaveOnly" class="secondary-btn">仅保存</button>
+      <button id="btnGenerate" class="primary-btn">一键生成</button>
+    </div>
+
+    <div id="status" class="status-msg"></div>
+
+    <div id="resultArea" style="display:none;">
+      <a id="downloadLink" href="#" target="_blank">查看生成的 PDF</a>
+    </div>
+  </div>
+
+  <!-- 大纲视图 -->
+  <div id="view-outline" style="display:none;">
+    <h4>检测到的考试主题 (请勾选)</h4>
+    <div id="outline-list"></div>
+    <div class="button-group">
+      <button id="btnBack" class="secondary-btn">返回修改</button>
+      <button id="btnConfirmGenerate" class="primary-btn">确认并生成</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

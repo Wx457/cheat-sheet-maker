@@ -1,0 +1,386 @@
+// 全局状态管理
+let currentProjectId = null // 暂存第一步分析后的项目 ID（如果需要）
+let currentOutlineData = null // 暂存分析结果
+
+// 获取页面元素
+const viewForm = document.getElementById('view-form')
+const viewOutline = document.getElementById('view-outline')
+const statusEl = document.getElementById('status')
+const outlineList = document.getElementById('outline-list')
+const resultArea = document.getElementById('resultArea')
+const downloadLink = document.getElementById('downloadLink')
+
+// 按钮元素
+const btnSaveOnly = document.getElementById('btnSaveOnly')
+const btnGenerate = document.getElementById('btnGenerate')
+const btnBack = document.getElementById('btnBack')
+const btnConfirmGenerate = document.getElementById('btnConfirmGenerate')
+
+// 显示状态消息
+function showStatus(message, type = 'loading') {
+  statusEl.textContent = message
+  statusEl.className = `status-msg ${type}`
+  statusEl.style.display = 'block'
+}
+
+// 隐藏状态消息
+function hideStatus() {
+  statusEl.style.display = 'none'
+}
+
+// 切换视图
+function showView(viewName) {
+  if (viewName === 'form') {
+    viewForm.style.display = 'block'
+    viewOutline.style.display = 'none'
+  } else if (viewName === 'outline') {
+    viewForm.style.display = 'none'
+    viewOutline.style.display = 'block'
+  }
+}
+
+// 获取当前标签页信息
+async function getCurrentTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  return tab
+}
+
+// 抓取当前页面内容
+async function scrapePageContent() {
+  try {
+    const tab = await getCurrentTab()
+    
+    // 向 content script 发送消息，请求抓取页面内容
+    const response = await chrome.tabs.sendMessage(tab.id, { action: 'scrape' })
+    
+    if (response && response.success && response.text && response.title) {
+      return {
+        text: response.text,
+        title: response.title,
+        url: tab.url
+      }
+    } else {
+      throw new Error(response?.error || '无法获取页面内容')
+    }
+  } catch (error) {
+    console.error('抓取页面内容失败:', error)
+    throw error
+  }
+}
+
+// 收集表单数据
+function collectFormData() {
+  const courseName = document.getElementById('courseName').value.trim()
+  const educationLevel = document.querySelector('input[name="educationLevel"]:checked')?.value || 'Undergraduate'
+  const examType = document.querySelector('input[name="examType"]:checked')?.value || 'Final'
+  const pageLimit = document.querySelector('input[name="pageLimit"]:checked')?.value || 'Unlimited'
+  const syllabus = document.getElementById('syllabusInput').value.trim()
+  
+  return {
+    courseName,
+    educationLevel,
+    examType,
+    pageLimit,
+    syllabus
+  }
+}
+
+// 映射前端值到后端枚举值
+function mapEducationLevel(frontendValue) {
+  const mapping = {
+    'Undergraduate': 'undergraduate',
+    'Graduate': 'graduate',
+    'High School': 'high_school'
+  }
+  return mapping[frontendValue] || 'undergraduate'
+}
+
+function mapExamType(frontendValue) {
+  const mapping = {
+    'Quiz': 'quiz',
+    'Midterm': 'midterm',
+    'Final': 'final'
+  }
+  return mapping[frontendValue] || 'final'
+}
+
+function mapPageLimit(frontendValue) {
+  const mapping = {
+    '1 side': '1_side',
+    '1 page': '1_page',
+    '2 pages': '2_pages',
+    'Unlimited': 'unlimited'
+  }
+  return mapping[frontendValue] || 'unlimited'
+}
+
+// 第一阶段：分析接口
+async function callAnalyzeAPI(content, formData, url) {
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/plugin/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: content,
+        syllabus: formData.syllabus || null,
+        url: url,
+        course_name: formData.courseName || null,
+        education_level: mapEducationLevel(formData.educationLevel),
+        exam_type: mapExamType(formData.examType)
+      })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('分析失败:', error)
+    throw error
+  }
+}
+
+// 渲染主题复选框列表
+function renderOutlineList(topics) {
+  outlineList.innerHTML = '' // 清空现有内容
+  
+  if (!topics || topics.length === 0) {
+    outlineList.innerHTML = '<p style="color: #999; text-align: center;">未检测到主题</p>'
+    return
+  }
+  
+  topics.forEach((topic, index) => {
+    const item = document.createElement('div')
+    item.className = 'outline-item'
+    
+    const checkbox = document.createElement('input')
+    checkbox.type = 'checkbox'
+    checkbox.id = `topic-${index}`
+    checkbox.value = topic.title
+    checkbox.checked = true // 默认全选
+    
+    const label = document.createElement('label')
+    label.htmlFor = `topic-${index}`
+    label.textContent = `${topic.title} (相关性: ${(topic.relevance_score * 100).toFixed(0)}%)`
+    
+    item.appendChild(checkbox)
+    item.appendChild(label)
+    outlineList.appendChild(item)
+  })
+}
+
+// 收集选中的主题
+function collectSelectedTopics() {
+  const checkboxes = outlineList.querySelectorAll('input[type="checkbox"]:checked')
+  const selectedTopics = []
+  
+  checkboxes.forEach(checkbox => {
+    // 从 currentOutlineData 中找到对应的 topic 以获取 relevance_score
+    const topic = currentOutlineData.topics.find(t => t.title === checkbox.value)
+    if (topic) {
+      selectedTopics.push({
+        title: topic.title,
+        relevance_score: topic.relevance_score
+      })
+    }
+  })
+  
+  return selectedTopics
+}
+
+// 第二阶段：生成最终内容接口
+async function callGenerateFinalAPI(selectedTopics, formData) {
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/plugin/generate-final', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        selected_topics: selectedTopics,
+        syllabus: formData.syllabus || null,
+        course_name: formData.courseName || null,
+        education_level: mapEducationLevel(formData.educationLevel),
+        exam_type: mapExamType(formData.examType),
+        page_limit: mapPageLimit(formData.pageLimit)
+      })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('生成失败:', error)
+    throw error
+  }
+}
+
+// 处理"仅保存"按钮点击
+async function handleSaveOnly() {
+  btnSaveOnly.disabled = true
+  showStatus('正在抓取页面内容...', 'loading')
+
+  try {
+    // 1. 抓取页面内容
+    const { text, title, url } = await scrapePageContent()
+    
+    if (!text || text.trim().length === 0) {
+      throw new Error('页面内容为空，无法保存')
+    }
+
+    // 2. 保存到知识库（使用旧的接口）
+    showStatus('正在保存到知识库...', 'loading')
+    
+    const saveResponse = await fetch('http://127.0.0.1:8000/api/rag/ingest', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: text,
+        source: url || title
+      })
+    })
+
+    if (!saveResponse.ok) {
+      const errorData = await saveResponse.json().catch(() => ({}))
+      throw new Error(errorData.detail || '保存失败')
+    }
+
+    const saveData = await saveResponse.json()
+    
+    if (saveData.status === 'success') {
+      showStatus(`✅ 成功保存！共处理 ${saveData.chunks_count} 个切片`, 'success')
+    } else {
+      throw new Error('保存失败')
+    }
+  } catch (error) {
+    showStatus(`❌ 错误: ${error.message}`, 'error')
+    console.error('保存失败:', error)
+  } finally {
+    btnSaveOnly.disabled = false
+  }
+}
+
+// 处理"一键生成"按钮点击（第一阶段）
+async function handleGenerate() {
+  btnGenerate.disabled = true
+  showStatus('正在抓取页面内容...', 'loading')
+
+  try {
+    // 1. 抓取页面内容
+    const { text, title, url } = await scrapePageContent()
+    
+    if (!text || text.trim().length === 0) {
+      throw new Error('页面内容为空，无法生成')
+    }
+
+    // 2. 收集表单数据
+    const formData = collectFormData()
+
+    // 3. 调用分析接口
+    showStatus('正在分析内容并提取主题...', 'loading')
+    const analyzeResult = await callAnalyzeAPI(text, formData, url)
+    
+    // 4. 保存分析结果
+    currentOutlineData = analyzeResult
+    
+    // 5. 渲染主题复选框列表
+    renderOutlineList(analyzeResult.topics)
+    
+    // 6. 切换到大纲视图
+    showView('outline')
+    hideStatus()
+    
+  } catch (error) {
+    showStatus(`❌ 错误: ${error.message}`, 'error')
+    console.error('生成失败:', error)
+  } finally {
+    btnGenerate.disabled = false
+  }
+}
+
+// 处理"返回修改"按钮点击
+function handleBack() {
+  showView('form')
+  hideStatus()
+}
+
+// 处理"确认并生成"按钮点击（第二阶段）
+async function handleConfirmGenerate() {
+  btnConfirmGenerate.disabled = true
+  showStatus('正在生成小抄...', 'loading')
+
+  try {
+    // 1. 收集表单数据
+    const formData = collectFormData()
+    
+    // 2. 收集选中的主题
+    const selectedTopics = collectSelectedTopics()
+    
+    if (selectedTopics.length === 0) {
+      throw new Error('请至少选择一个主题')
+    }
+
+    // 3. 调用生成接口
+    const generateResult = await callGenerateFinalAPI(selectedTopics, formData)
+    
+    // 4. 检查是否有 project_id
+    if (!generateResult.project_id) {
+      throw new Error('生成失败：未返回项目ID')
+    }
+
+    // 5. 调用 PDF 下载接口
+    showStatus('正在生成 PDF...', 'loading')
+    const pdfResponse = await fetch(
+      `http://127.0.0.1:8000/api/plugin/download-cheat-sheet/${generateResult.project_id}`,
+      {
+        method: 'GET',
+      }
+    )
+
+    if (!pdfResponse.ok) {
+      const errorData = await pdfResponse.json().catch(() => ({}))
+      throw new Error(errorData.detail || `PDF 生成失败: ${pdfResponse.status}`)
+    }
+
+    // 6. 获取 PDF 二进制数据并创建下载链接
+    const pdfBlob = await pdfResponse.blob()
+    const pdfUrl = URL.createObjectURL(pdfBlob)
+    
+    downloadLink.href = pdfUrl
+    downloadLink.download = `cheat-sheet-${generateResult.project_id}.pdf`
+    downloadLink.textContent = '下载生成的 Cheat Sheet (PDF)'
+    resultArea.style.display = 'block'
+    
+    showStatus('✅ 生成成功！', 'success')
+    
+    // 切换回表单视图，显示结果
+    showView('form')
+    
+  } catch (error) {
+    showStatus(`❌ 错误: ${error.message}`, 'error')
+    console.error('生成失败:', error)
+  } finally {
+    btnConfirmGenerate.disabled = false
+  }
+}
+
+// 绑定事件
+btnSaveOnly.addEventListener('click', handleSaveOnly)
+btnGenerate.addEventListener('click', handleGenerate)
+btnBack.addEventListener('click', handleBack)
+btnConfirmGenerate.addEventListener('click', handleConfirmGenerate)
+
+// 页面加载时初始化
+// 默认显示表单视图
+showView('form')

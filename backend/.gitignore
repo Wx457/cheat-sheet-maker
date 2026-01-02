@@ -1,0 +1,19 @@
+# 忽略 Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 忽略虚拟环境 (8000 个文件的来源)
+venv/
+.venv/
+env/
+
+# 忽略敏感配置
+.env
+
+# 忽略本地测试文件
+service_test.py
+test_key.py
+
+tipstxt/

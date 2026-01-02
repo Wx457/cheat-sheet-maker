@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Cheat Sheet RAG Clipper",
+  "version": "1.0.0",
+  "description": "将网页内容保存到 RAG 知识库",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon120.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ]
+}
+
