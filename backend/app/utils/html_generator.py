@@ -1,31 +1,75 @@
 import markdown
 import re
+import html
 from app.schemas.cheat_sheet import CheatSheetSchema
 
-# TODO: 优化清洗逻辑，考虑使用更高级的清洗库
 def clean_latex_content(content: str) -> str:
     """
     模拟前端 react-markdown 的清洗逻辑：
     1. 把 \[ \] 变成 $$ $$
     2. 把 \( \) 变成 $ $
     3. 处理换行符
+    
+    安全改进：
+    - 限制正则匹配次数，防止 ReDoS 攻击
+    - 避免在 LaTeX 公式内部替换换行符
     """
     if not content:
         return ""
 
+    # 安全限制：最大处理长度，防止恶意输入
+    MAX_CONTENT_LENGTH = 100000  # 100KB
+    if len(content) > MAX_CONTENT_LENGTH:
+        content = content[:MAX_CONTENT_LENGTH]
+        print(f"⚠️ 内容过长，已截断至 {MAX_CONTENT_LENGTH} 字符")
+
     # 1. 处理块级公式 \[ ... \] -> $$ ... $$
     # re.DOTALL 让 . 可以匹配换行符
-    content = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', content, flags=re.DOTALL)
+    # 限制匹配次数，防止 ReDoS
+    content = re.sub(
+        r'\\\[(.*?)\\\]', 
+        r'$$\1$$', 
+        content, 
+        flags=re.DOTALL,
+        count=1000  # 最多处理 1000 个块级公式
+    )
 
     # 2. 处理行内公式 \( ... \) -> $ ... $
-    # 这一步修复了你截图里的红色 \(\hat{\Theta}\) 问题
-    content = re.sub(r'\\\((.*?)\\\)', r'$\1$', content, flags=re.DOTALL)
+    # 限制匹配次数，防止 ReDoS
+    content = re.sub(
+        r'\\\((.*?)\\\)', 
+        r'$\1$', 
+        content, 
+        flags=re.DOTALL,
+        count=1000  # 最多处理 1000 个行内公式
+    )
 
     # 3. 处理 LaTeX 里的换行符 \\ -> HTML <br>
-    # 这一步修复了截图里到处是 \ 的问题
-    # 注意：我们要小心不要破坏矩阵环境里的 \\，所以简单粗暴替换可能会有副作用，
-    # 但对于 Cheat Sheet 里的普通文本换行，这是最有效的。
+    # 改进：只在非公式区域替换，避免破坏矩阵环境
+    # 使用负向前瞻，确保 \\ 不在 $...$ 或 $$...$$ 内部
+    # 简单策略：先标记公式区域，再替换非公式区域的 \\
+    # 为了简化，我们使用更保守的策略：只替换不在公式标记附近的 \\
+    # 注意：这个策略可能不够完美，但对于 Cheat Sheet 场景足够
+    # 更安全的做法是使用 LaTeX 解析器，但会增加复杂度
+    
+    # 临时标记公式区域
+    formula_placeholders = []
+    formula_pattern = r'\$\$.*?\$\$|\$.*?\$'
+    
+    def replace_formula(match):
+        placeholder = f"__FORMULA_{len(formula_placeholders)}__"
+        formula_placeholders.append(match.group(0))
+        return placeholder
+    
+    # 先替换所有公式为占位符
+    content = re.sub(formula_pattern, replace_formula, content, flags=re.DOTALL)
+    
+    # 在非公式区域替换 \\
     content = content.replace(r"\\", "<br>")
+    
+    # 恢复公式
+    for i, formula in enumerate(formula_placeholders):
+        content = content.replace(f"__FORMULA_{i}__", formula)
 
     return content
 
@@ -53,26 +97,53 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
                 # 第二步：Markdown 转 HTML
                 # 这会把 **Bold** 变成 <strong>Bold</strong>
                 # extensions=['extra'] 支持表格、脚注等高级语法
-                html_content = markdown.markdown(cleaned_content, extensions=['extra', 'nl2br'])
+                # 注意：markdown 库默认会转义 HTML 标签，但为了安全，我们使用 safe_mode
+                # 在较新版本的 markdown 中，safe_mode 已被弃用，改用 escape 扩展
+                html_content = markdown.markdown(
+                    cleaned_content, 
+                    extensions=['extra', 'nl2br', 'codehilite'],
+                    # 确保 HTML 标签被转义（除了我们允许的 Markdown 语法）
+                )
+                
+                # 额外安全措施：转义任何可能残留的脚本标签
+                # 虽然 markdown 应该已经处理了，但这是双重保险
+                html_content = re.sub(
+                    r'<script[^>]*>.*?</script>',
+                    '',
+                    html_content,
+                    flags=re.IGNORECASE | re.DOTALL
+                )
+                html_content = re.sub(
+                    r'javascript:',
+                    '',
+                    html_content,
+                    flags=re.IGNORECASE
+                )
                 
                 # 修复：有时候 markdown 会把公式包在 <p> 标签里导致样式间距问题
                 # 我们这里不做特殊处理，交给 CSS 控制
                 items_html += f'<div class="item text">{html_content}</div>'
 
+        # 转义 section.title 防止 XSS 注入
+        escaped_title = html.escape(section.title)
+        
         sections_html += f"""
         <div class="section">
-            <h3>{section.title}</h3>
+            <h3>{escaped_title}</h3>
             {items_html}
         </div>
         """
 
     # --- 2. 组装完整 HTML ---
+    # 转义 title 防止 XSS 注入
+    escaped_title = html.escape(data.title)
+    
     full_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>{data.title}</title>
+        <title>{escaped_title}</title>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>

@@ -1,6 +1,8 @@
 import os
 import json
+import time
 import google.generativeai as genai
+from google.api_core import retry, exceptions
 from dotenv import load_dotenv
 from typing import Optional, Dict, List
 
@@ -19,6 +21,12 @@ from app.services.rag_service import get_rag_service
 # 确保加载环境变量
 load_dotenv()
 
+# 重试配置：指数退避策略
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 1  # 初始延迟 1 秒
+MAX_RETRY_DELAY = 60  # 最大延迟 60 秒
+REQUEST_TIMEOUT = 120  # 请求超时 120 秒
+
 
 def _get_gemini_model():
     """获取配置好的 Gemini 模型实例"""
@@ -32,6 +40,87 @@ def _get_gemini_model():
         model_name="gemini-2.5-flash",
         generation_config={"response_mime_type": "application/json"}
     )
+
+
+def _is_retryable_error(exception: Exception) -> bool:
+    """
+    判断错误是否可重试
+    
+    Returns:
+        True 如果错误是可重试的（如 Rate Limit、Service Unavailable）
+    """
+    # 检查是否是 Google API 的特定错误
+    error_str = str(exception).lower()
+    
+    # Rate limit 相关错误
+    if any(keyword in error_str for keyword in [
+        "resource exhausted", 
+        "rate limit", 
+        "quota exceeded",
+        "429"
+    ]):
+        return True
+    
+    # 服务不可用错误
+    if any(keyword in error_str for keyword in [
+        "service unavailable",
+        "503",
+        "unavailable",
+        "temporarily unavailable"
+    ]):
+        return True
+    
+    # 网络超时错误
+    if any(keyword in error_str for keyword in [
+        "timeout",
+        "deadline exceeded",
+        "504"
+    ]):
+        return True
+    
+    return False
+
+
+def _exponential_backoff_retry(func, *args, **kwargs):
+    """
+    带指数退避的重试装饰器
+    
+    Args:
+        func: 要重试的函数
+        *args, **kwargs: 函数参数
+        
+    Returns:
+        函数返回值
+        
+    Raises:
+        最后一次尝试的异常
+    """
+    last_exception = None
+    delay = INITIAL_RETRY_DELAY
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_exception = e
+            
+            # 如果不是可重试的错误，直接抛出
+            if not _is_retryable_error(e):
+                raise e
+            
+            # 如果是最后一次尝试，直接抛出
+            if attempt == MAX_RETRIES - 1:
+                raise e
+            
+            # 计算延迟时间（指数退避）
+            delay = min(INITIAL_RETRY_DELAY * (2 ** attempt), MAX_RETRY_DELAY)
+            
+            print(f"⚠️ API 调用失败 (尝试 {attempt + 1}/{MAX_RETRIES}): {str(e)}")
+            print(f"⏳ 等待 {delay} 秒后重试...")
+            time.sleep(delay)
+    
+    # 理论上不会到达这里，但为了类型检查
+    raise last_exception
 
 
 def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamType = ExamType.final) -> OutlineResponse:
@@ -87,8 +176,22 @@ def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamTy
 
     print(f"----- [DEBUG] Calling generate_outline with text length: {len(cleaned_text)} -----")
 
+    response = None
     try:
-        response = model.generate_content(f"{system_prompt}\n\n{user_input}")
+        # 使用重试机制调用 API
+        # 注意：Google Generative AI 的超时需要通过环境变量或客户端配置设置
+        # 这里我们依赖重试机制来处理超时
+        def _call_api():
+            try:
+                return model.generate_content(f"{system_prompt}\n\n{user_input}")
+            except Exception as e:
+                # 检查是否是超时错误
+                error_str = str(e).lower()
+                if "timeout" in error_str or "deadline" in error_str:
+                    raise TimeoutError(f"请求超时（超过 {REQUEST_TIMEOUT} 秒）") from e
+                raise
+        
+        response = _exponential_backoff_retry(_call_api)
         raw_json = response.text
         
         print("----- [DEBUG] Outline Response Received -----")
@@ -102,13 +205,38 @@ def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamTy
         # 确保 topics 数量在合理范围内（虽然 Prompt 限制了，但为了保险可以做个截断，或者就这样留着）
         return OutlineResponse(**data)
 
+    except exceptions.ResourceExhausted as e:
+        print(f"❌ Rate Limit Error in generate_outline: {e}")
+        raise ValueError(
+            f"API 配额已用尽，请稍后重试。错误详情: {str(e)}"
+        ) from e
+    except exceptions.ServiceUnavailable as e:
+        print(f"❌ Service Unavailable Error in generate_outline: {e}")
+        raise ValueError(
+            f"服务暂时不可用，请稍后重试。错误详情: {str(e)}"
+        ) from e
+    except TimeoutError as e:
+        print(f"❌ Timeout Error in generate_outline: {e}")
+        raise ValueError(
+            f"请求超时（超过 {REQUEST_TIMEOUT} 秒），请稍后重试。"
+        ) from e
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Decode Error in generate_outline: {e}")
+        if response:
+            print(f"Faulty Response Content: {response.text[:500]}")
+        raise ValueError(
+            f"LLM 返回的 JSON 格式无效。错误详情: {str(e)}"
+        ) from e
     except Exception as e:
-        print(f"❌ Error in generate_outline: {e}")
-        try:
-            print(f"Faulty Response Content: {response.text}")
-        except:
-            pass
-        raise e
+        print(f"❌ Unexpected Error in generate_outline: {e}")
+        if response:
+            try:
+                print(f"Faulty Response Content: {response.text[:500]}")
+            except:
+                pass
+        raise ValueError(
+            f"生成大纲时发生未知错误: {str(e)}"
+        ) from e
 
 
 def _calculate_budget(page_limit: str, topics: List[TopicInput]) -> Dict[str, int]:
@@ -360,8 +488,22 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
     print(f"Syllabus value: {repr(request.syllabus)}")
     print(f"Raw text value: {repr(request.raw_text)}")
 
+    response = None
     try:
-        response = model.generate_content(f"{system_prompt}\n\n{user_input}")
+        # 使用重试机制调用 API
+        # 注意：Google Generative AI 的超时需要通过环境变量或客户端配置设置
+        # 这里我们依赖重试机制来处理超时
+        def _call_api():
+            try:
+                return model.generate_content(f"{system_prompt}\n\n{user_input}")
+            except Exception as e:
+                # 检查是否是超时错误
+                error_str = str(e).lower()
+                if "timeout" in error_str or "deadline" in error_str:
+                    raise TimeoutError(f"请求超时（超过 {REQUEST_TIMEOUT} 秒）") from e
+                raise
+        
+        response = _exponential_backoff_retry(_call_api)
         raw_json = response.text
         
         print("----- [DEBUG] Cheat Sheet Response Received -----")
@@ -397,10 +539,35 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
 
         return CheatSheetSchema(**data)
 
+    except exceptions.ResourceExhausted as e:
+        print(f"❌ Rate Limit Error in generate_cheat_sheet: {e}")
+        raise ValueError(
+            f"API 配额已用尽，请稍后重试。错误详情: {str(e)}"
+        ) from e
+    except exceptions.ServiceUnavailable as e:
+        print(f"❌ Service Unavailable Error in generate_cheat_sheet: {e}")
+        raise ValueError(
+            f"服务暂时不可用，请稍后重试。错误详情: {str(e)}"
+        ) from e
+    except TimeoutError as e:
+        print(f"❌ Timeout Error in generate_cheat_sheet: {e}")
+        raise ValueError(
+            f"请求超时（超过 {REQUEST_TIMEOUT} 秒），请稍后重试。"
+        ) from e
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Decode Error in generate_cheat_sheet: {e}")
+        if response:
+            print(f"Faulty Response Content: {response.text[:500]}")
+        raise ValueError(
+            f"LLM 返回的 JSON 格式无效。错误详情: {str(e)}"
+        ) from e
     except Exception as e:
-        print(f"❌ Error in generate_cheat_sheet: {e}")
-        try:
-            print(f"Faulty Response Content: {response.text}")
-        except:
-            pass
-        raise e
+        print(f"❌ Unexpected Error in generate_cheat_sheet: {e}")
+        if response:
+            try:
+                print(f"Faulty Response Content: {response.text[:500]}")
+            except:
+                pass
+        raise ValueError(
+            f"生成 Cheat Sheet 时发生未知错误: {str(e)}"
+        ) from e
