@@ -6,6 +6,55 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from typing import Optional
 
 
+async def generate_pdf_from_html(html_content: str) -> bytes:
+    """
+    从 HTML 内容直接生成 PDF
+    
+    Args:
+        html_content: 完整的 HTML 字符串
+        
+    Returns:
+        PDF 文件的二进制数据
+        
+    Note:
+        直接注入 HTML，不走网络请求，无需访问 localhost
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+            ]
+        )
+        try:
+            page = await browser.new_page()
+            
+            # 【核心修改】直接注入 HTML，不走网络请求，无需 Localhost
+            await page.set_content(html_content, wait_until="networkidle")
+            
+            # 等待 KaTeX 渲染 (给 JS 一点时间把公式画出来)
+            try:
+                await page.wait_for_selector('.katex', timeout=2000)
+            except:
+                pass  # 如果没公式也无所谓
+            
+            # 额外等待一小段时间，确保所有动态内容都已渲染
+            await page.wait_for_timeout(1000)
+
+            pdf_bytes = await page.pdf(
+                format="A4",
+                print_background=True,
+                margin={"top": "15mm", "bottom": "15mm", "left": "15mm", "right": "15mm"}
+            )
+            return pdf_bytes
+        finally:
+            await browser.close()
+
+
 class PDFService:
     """PDF 生成服务类"""
     

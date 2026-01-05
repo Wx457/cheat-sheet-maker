@@ -20,7 +20,8 @@ from app.schemas import (
 from app.services.rag_service import get_rag_service
 from app.services.llm import generate_outline, generate_cheat_sheet
 from app.services.cleaner import clean_raw_text
-from app.services.pdf_service import get_pdf_service
+from app.services.pdf_service import generate_pdf_from_html
+from app.utils.html_generator import generate_cheat_sheet_html
 from app.core.config import settings
 
 router = APIRouter()
@@ -222,8 +223,8 @@ async def download_cheat_sheet(project_id: str) -> Response:
     
     流程：
     1. 从数据库获取项目数据（确保数据已存库）
-    2. 构造预览 URL: http://localhost:5173/preview/{project_id}
-    3. 使用 Playwright 访问预览页并生成 PDF
+    2. 生成 HTML 内容（包含 Markdown 和 LaTeX 渲染）
+    3. 使用 Playwright 直接渲染 HTML 并生成 PDF
     4. 返回 PDF 文件流
     """
     try:
@@ -247,16 +248,26 @@ async def download_cheat_sheet(project_id: str) -> Response:
                 detail=f"未找到项目: {project_id}"
             )
         
+        # 获取 Cheat Sheet 数据
+        cheat_sheet_data = project.get("cheat_sheet", {})
+        if not cheat_sheet_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"项目中未找到小抄数据: {project_id}"
+            )
+        
         client.close()
         
-        # 2. 构造预览 URL
-        target_url = f"http://localhost:5173/preview/{project_id}"
+        # 2. 将字典转换为 CheatSheetSchema 对象
+        cheat_sheet = CheatSheetSchema(**cheat_sheet_data)
         
-        # 3. 使用 PDF 服务生成 PDF
-        pdf_service = get_pdf_service()
-        pdf_bytes = await pdf_service.generate_pdf_from_url(target_url)
+        # 3. 生成 HTML (这一步解决了格式乱码和 Markdown 渲染)
+        html_content = generate_cheat_sheet_html(cheat_sheet)
         
-        # 4. 返回 PDF 文件流
+        # 4. 生成 PDF (这一步解决了 Localhost 连接被拒问题)
+        pdf_bytes = await generate_pdf_from_html(html_content)
+        
+        # 5. 返回 PDF 文件流
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",

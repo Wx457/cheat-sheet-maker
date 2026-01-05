@@ -17,3 +17,4 @@ pypdf
 json_repair
 python-multipart
 playwright
+markdown
