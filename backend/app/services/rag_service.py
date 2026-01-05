@@ -3,12 +3,12 @@ import io
 from typing import List
 from pymongo import MongoClient
 from pypdf import PdfReader
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_mongodb import MongoDBAtlasVectorSearch
 
 from app.core.config import settings
+from app.services.embedding_service import OpenAIEmbeddings
 
 
 class RAGService:
@@ -25,11 +25,8 @@ class RAGService:
         self.db = self.client[settings.DB_NAME]
         self.collection = self.db[settings.COLLECTION_NAME]
         
-        # 初始化 HuggingFace Embeddings（本地模型，768 维度，兼容 MongoDB 现有配置）
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-mpnet-base-v2",
-            model_kwargs={'device': 'cuda'}
-        )
+        # 初始化 OpenAI Embeddings（使用 text-embedding-3-small 模型，1536 维度）
+        self.embeddings = OpenAIEmbeddings()
         
         # 初始化文本分割器
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -41,7 +38,7 @@ class RAGService:
         """
         将原始文本摄入到 MongoDB Atlas Vector Search
         
-        使用本地 HuggingFace 模型，无需限速。
+        使用 OpenAI text-embedding-3-small 模型（1536 维度）。
         
         Args:
             raw_text: 原始文本内容
@@ -69,7 +66,7 @@ class RAGService:
             index_name="default"
         )
         
-        # 4. 一次性添加所有文档（本地模型，无需限速）
+        # 4. 一次性添加所有文档
         await asyncio.to_thread(
             vector_store.add_documents,
             documents
@@ -143,6 +140,25 @@ class RAGService:
             }
             for doc, score in results
         ]
+    
+    def clear_vector_data(self) -> int:
+        """
+        清理 MongoDB 中的旧向量数据。
+        
+        由于模型从 HuggingFace (768 维) 更换为 OpenAI (1536 维)，
+        旧的向量数据必须清除，否则会报维度不匹配错误。
+        
+        Returns:
+            删除的文档数量
+        """
+        try:
+            result = self.collection.delete_many({})
+            deleted_count = result.deleted_count
+            print(f"✅ 已清理 {deleted_count} 条旧向量数据")
+            return deleted_count
+        except Exception as e:
+            print(f"❌ 清理向量数据时发生错误: {e}")
+            raise
     
     def close(self):
         """关闭 MongoDB 连接"""
