@@ -1,48 +1,109 @@
 import traceback
-
-from fastapi import APIRouter, Body, HTTPException
+from pydantic import BaseModel
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.schemas import (
-    CheatSheetSchema,
     GenerateOutlineRequest,
     GenerateSheetRequest,
-    OutlineResponse,
 )
-from app.services.llm import generate_cheat_sheet as llm_generate_cheat_sheet
-from app.services.llm import generate_outline as llm_generate_outline
 
 router = APIRouter()
 
 
-@router.post("/api/outline", response_model=OutlineResponse)
-async def generate_outline(payload: GenerateOutlineRequest = Body(...)) -> OutlineResponse:
+class TaskResponse(BaseModel):
+    """任务提交响应"""
+    task_id: str
+    status: str = "pending"
+    message: str = "任务已提交，正在处理中"
+
+
+@router.post("/api/outline", response_model=TaskResponse)
+async def generate_outline(
+    request: Request,
+    payload: GenerateOutlineRequest = Body(...)
+) -> TaskResponse:
     """
     生成复习大纲，分析对话记录并提取核心考试主题。
+    
+    现在改为异步任务模式：
+    1. 将任务推送到 ARQ 队列
+    2. 立即返回 task_id
+    3. 客户端可以通过 /api/task/{task_id} 查询任务状态和结果
     """
     try:
-        result = llm_generate_outline(payload.raw_text, payload.user_context, payload.exam_type)
-        return result
+        # 从应用状态获取 ARQ 连接池
+        arq_pool = request.app.state.arq_pool
+        
+        # 提交任务到 ARQ 队列
+        job = await arq_pool.enqueue_job(
+            'generate_outline_task',
+            raw_text=payload.raw_text,
+            user_context=payload.user_context,
+            exam_type=payload.exam_type.value if payload.exam_type else "final"
+        )
+        
+        return TaskResponse(
+            task_id=job.job_id,
+            status="pending",
+            message="大纲生成任务已提交，正在处理中"
+        )
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"生成大纲时发生错误: {str(e)}"
+            detail=f"提交任务时发生错误: {str(e)}"
         )
 
 
-@router.post("/api/generate", response_model=CheatSheetSchema)
-async def generate_cheat_sheet(payload: GenerateSheetRequest = Body(...)) -> CheatSheetSchema:
+@router.post("/api/generate", response_model=TaskResponse)
+async def generate_cheat_sheet(
+    request: Request,
+    payload: GenerateSheetRequest = Body(...)
+) -> TaskResponse:
     """
     生成备忘清单，使用 Google Gemini API 处理用户输入的文本。
     支持混合检索和领域自适应算法。
+    
+    现在改为异步任务模式：
+    1. 将任务推送到 ARQ 队列
+    2. 立即返回 task_id
+    3. 客户端可以通过 /api/task/{task_id} 查询任务状态和结果
     """
     try:
-        result = await llm_generate_cheat_sheet(payload)
-        return result
+        # 从应用状态获取 ARQ 连接池
+        arq_pool = request.app.state.arq_pool
+        
+        # 构建任务参数（将 Pydantic 模型转换为字典）
+        task_kwargs = payload.model_dump(exclude_none=True)
+        
+        # 处理枚举类型
+        if payload.page_limit:
+            task_kwargs["page_limit"] = payload.page_limit.value
+        if payload.academic_level:
+            task_kwargs["academic_level"] = payload.academic_level.value
+        if payload.exam_type:
+            task_kwargs["exam_type"] = payload.exam_type.value
+        if payload.archetype:
+            task_kwargs["archetype"] = payload.archetype.value
+        if payload.selected_topics:
+            task_kwargs["selected_topics"] = [
+                topic.model_dump() for topic in payload.selected_topics
+            ]
+        
+        # 提交任务到 ARQ 队列
+        job = await arq_pool.enqueue_job(
+            'generate_cheat_sheet_task',
+            **task_kwargs
+        )
+        
+        return TaskResponse(
+            task_id=job.job_id,
+            status="pending",
+            message="小抄生成任务已提交，正在处理中"
+        )
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"生成小抄时发生错误: {str(e)}"
+            detail=f"提交任务时发生错误: {str(e)}"
         )
-

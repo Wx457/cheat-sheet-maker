@@ -2,17 +2,15 @@ import traceback
 from datetime import datetime
 from bson import ObjectId
 from pymongo import MongoClient
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 
 from app.schemas import (
-    OutlineResponse,
     CheatSheetSchema,
     PluginAnalyzeRequest,
     PluginGenerateRequest,
-    GenerateFinalResponse,
     TopicInput,
     GenerateSheetRequest,
     AcademicLevel,
@@ -20,10 +18,7 @@ from app.schemas import (
     PageLimit,
 )
 from app.services.rag_service import get_rag_service
-from app.services.llm import generate_outline, generate_cheat_sheet
 from app.services.cleaner import clean_raw_text
-from app.services.pdf_service import generate_pdf_from_html
-from app.utils.html_generator import generate_cheat_sheet_html
 from app.core.config import settings
 
 router = APIRouter()
@@ -69,8 +64,18 @@ def _create_error_response(
     )
 
 
-@router.post("/api/plugin/analyze", response_model=OutlineResponse)
-async def plugin_analyze(payload: PluginAnalyzeRequest = Body(...)) -> OutlineResponse:
+class TaskResponse(BaseModel):
+    """任务提交响应"""
+    task_id: str
+    status: str = "pending"
+    message: str = "任务已提交，正在处理中"
+
+
+@router.post("/api/plugin/analyze", response_model=TaskResponse)
+async def plugin_analyze(
+    request: Request,
+    payload: PluginAnalyzeRequest = Body(...)
+) -> TaskResponse:
     """
     Chrome 插件：抓取 + 分析接口
     
@@ -117,7 +122,7 @@ async def plugin_analyze(payload: PluginAnalyzeRequest = Body(...)) -> OutlineRe
                     rag_context_str += f"Content: {result['content']}\n"
                     rag_context_str += "---------------------------------------\n"
         
-        # Step 3: 生成主题列表
+        # Step 3: 生成主题列表（改为异步任务模式）
         # 基于检索到的 RAG 上下文生成主题列表
         # 如果 RAG 上下文为空，使用原始内容摘要作为后备
         if rag_context_str:
@@ -131,15 +136,21 @@ async def plugin_analyze(payload: PluginAnalyzeRequest = Body(...)) -> OutlineRe
             analysis_text = payload.content[:2000]
             print("⚠️ 未检索到 RAG 上下文，使用原始内容摘要")
         
-        # 调用 generate_outline 生成主题列表
-        # 复用现有的 generate_outline 函数
-        outline_result = generate_outline(
-            text=analysis_text,
-            context=payload.course_name,
-            exam_type=payload.exam_type or ExamType.final
+        # 将生成大纲任务推送到 ARQ 队列
+        arq_pool = request.app.state.arq_pool
+        
+        job = await arq_pool.enqueue_job(
+            'generate_outline_task',
+            raw_text=analysis_text,
+            user_context=payload.course_name,
+            exam_type=(payload.exam_type or ExamType.final).value
         )
         
-        return outline_result
+        return TaskResponse(
+            task_id=job.job_id,
+            status="pending",
+            message="分析任务已提交，正在生成主题列表"
+        )
         
     except ValueError as e:
         # LLM 相关的错误（如 Rate Limit、超时等）
@@ -185,61 +196,52 @@ async def plugin_analyze(payload: PluginAnalyzeRequest = Body(...)) -> OutlineRe
         )
 
 
-@router.post("/api/plugin/generate-final", response_model=GenerateFinalResponse)
-async def plugin_generate_final(payload: PluginGenerateRequest = Body(...)) -> GenerateFinalResponse:
+@router.post("/api/plugin/generate-final", response_model=TaskResponse)
+async def plugin_generate_final(
+    request: Request,
+    payload: PluginGenerateRequest = Body(...)
+) -> TaskResponse:
     """
     Chrome 插件：生成最终 PDF 内容
     
-    流程：
-    1. 构造 GenerateSheetRequest，复用现有的生成逻辑
-    2. 调用 generate_cheat_sheet，它会自动从向量数据库检索上下文并生成内容
-    3. 将生成的结果保存到数据库，返回 project_id
+    现在改为异步任务模式：
+    1. 将生成任务推送到 Redis 队列
+    2. 立即返回 task_id
+    3. Worker 会处理任务，生成小抄并保存到数据库
+    4. 客户端可以通过 /api/task/{task_id} 查询任务状态和结果（包含 project_id）
     """
     try:
-        # 构造 GenerateSheetRequest，复用现有的生成逻辑
-        # generate_cheat_sheet 内部会自动根据 selected_topics 从向量数据库检索上下文
-        generate_request = GenerateSheetRequest(
-            syllabus=payload.syllabus,
-            user_context=payload.course_name,
-            page_limit=payload.page_limit or PageLimit.one_page,
-            academic_level=payload.education_level or AcademicLevel.undergraduate,
-            selected_topics=payload.selected_topics,
-            exam_type=payload.exam_type or ExamType.final
-        )
+        arq_pool = request.app.state.arq_pool
         
-        # 调用现有的 generate_cheat_sheet 函数
-        # 该函数内部会：
-        # 1. 根据 selected_topics 从向量数据库检索上下文
-        # 2. 使用 syllabus 作为过滤指令
-        # 3. 生成最终的 Cheat Sheet
-        result = await generate_cheat_sheet(generate_request)
-        
-        # 保存项目到数据库
-        client = MongoClient(settings.MONGODB_URI)
-        db = client[settings.DB_NAME]
-        projects_collection = db["projects"]
-        
-        # 将 CheatSheetSchema 转换为字典
-        project_data = {
-            "cheat_sheet": result.model_dump(),
-            "course_name": payload.course_name,
+        # 构造 GenerateSheetRequest 的负载数据
+        task_kwargs = {
             "syllabus": payload.syllabus,
-            "education_level": payload.education_level.value if payload.education_level else None,
-            "exam_type": payload.exam_type.value if payload.exam_type else None,
-            "page_limit": payload.page_limit.value if payload.page_limit else None,
+            "user_context": payload.course_name,
+            "page_limit": (payload.page_limit or PageLimit.one_page).value,
+            "academic_level": (payload.education_level or AcademicLevel.undergraduate).value,
             "selected_topics": [topic.model_dump() for topic in payload.selected_topics],
-            "created_at": datetime.utcnow(),
+            "exam_type": (payload.exam_type or ExamType.final).value,
+            # 添加额外的元数据，用于 Worker 保存到数据库
+            "_metadata": {
+                "course_name": payload.course_name,
+                "syllabus": payload.syllabus,
+                "education_level": payload.education_level.value if payload.education_level else None,
+                "exam_type": payload.exam_type.value if payload.exam_type else None,
+                "page_limit": payload.page_limit.value if payload.page_limit else None,
+                "selected_topics": [topic.model_dump() for topic in payload.selected_topics],
+            }
         }
         
-        # 插入数据库
-        insert_result = projects_collection.insert_one(project_data)
-        project_id = str(insert_result.inserted_id)
+        # 推送任务到 ARQ 队列
+        job = await arq_pool.enqueue_job(
+            'generate_cheat_sheet_task',
+            **task_kwargs
+        )
         
-        client.close()
-        
-        return GenerateFinalResponse(
-            project_id=project_id,
-            cheat_sheet=result
+        return TaskResponse(
+            task_id=job.job_id,
+            status="pending",
+            message="小抄生成任务已提交，正在处理中"
         )
         
     except ValueError as e:

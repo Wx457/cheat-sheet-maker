@@ -1,6 +1,7 @@
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.0
+arq==0.26.3
 async-timeout==4.0.3
 cachetools==6.2.4
 certifi==2025.11.12
@@ -24,6 +25,7 @@ grpcio==1.76.0
 grpcio-status==1.71.2
 h11==0.16.0
 hf-xet==1.2.0
+hiredis==3.3.0
 httpcore==1.0.9
 httplib2==0.31.0
 httpx==0.28.1
@@ -38,6 +40,7 @@ jsonpointer==3.0.0
 langchain==1.2.0
 langchain-classic==1.0.1
 langchain-core==1.2.5
+langchain-huggingface==1.2.0
 langchain-mongodb==0.9.0
 langchain-text-splitters==1.1.0
 langgraph==1.0.5
@@ -79,6 +82,7 @@ pyasn1_modules==0.4.2
 pydantic==2.12.5
 pydantic_core==2.41.5
 pyee==13.0.0
+PyJWT==2.10.1
 pymongo==4.15.5
 pymongo-search-utils==0.1.0
 pyparsing==3.3.1
@@ -86,6 +90,7 @@ pypdf==6.5.0
 python-dotenv==1.2.1
 python-multipart==0.0.21
 PyYAML==6.0.3
+redis==5.3.1
 regex==2025.11.3
 requests==2.32.5
 requests-toolbelt==1.0.0
