@@ -5,12 +5,14 @@ ARQ Worker 进程
 import traceback
 import base64
 from typing import Dict, Any
+from datetime import datetime
 
 from arq.connections import RedisSettings
 from arq.worker import Worker
 
 from app.services.llm import generate_outline, generate_cheat_sheet
 from app.services.pdf_service import generate_pdf_from_html
+from app.services.storage import get_storage_service
 from app.utils.html_generator import generate_cheat_sheet_html
 from app.schemas import (
     GenerateSheetRequest,
@@ -68,14 +70,22 @@ async def generate_cheat_sheet_task(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    ARQ 任务：生成小抄
+    ARQ 任务：生成小抄（全流程）
+    
+    流程：
+    1. LLM 生成小抄内容
+    2. 保存到数据库（如果包含 _metadata）
+    3. 生成 HTML
+    4. 生成 PDF
+    5. 上传到 MinIO
+    6. 返回包含 file_key 的结果
     
     Args:
         ctx: ARQ 上下文
         **kwargs: GenerateSheetRequest 的所有字段，可能包含 _metadata
         
     Returns:
-        任务结果（如果包含 _metadata，会保存到数据库并返回 project_id）
+        任务结果（包含 file_key 和 project_id）
     """
     try:
         # 提取元数据（如果存在）
@@ -84,10 +94,10 @@ async def generate_cheat_sheet_task(
         # 构建请求参数
         generate_request = GenerateSheetRequest(**kwargs)
         
-        # 调用生成函数
+        # Step 1: 调用 LLM 生成函数
         result = await generate_cheat_sheet(generate_request)
         
-        # 如果包含元数据，保存到数据库
+        # Step 2: 如果包含元数据，保存到数据库
         project_id = None
         if metadata:
             from pymongo import MongoClient
@@ -114,10 +124,34 @@ async def generate_cheat_sheet_task(
             project_id = str(insert_result.inserted_id)
             client.close()
         
-        # 返回结果
+        # Step 3: 生成 HTML
+        html_content = generate_cheat_sheet_html(result)
+        
+        # Step 4: 生成 PDF
+        pdf_bytes = await generate_pdf_from_html(html_content)
+        
+        # Step 5: 上传到 MinIO
+        storage_service = get_storage_service()
+        
+        # 生成文件名（使用小抄标题和时间戳）
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_title = "".join(c for c in result.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_title = safe_title.replace(' ', '_')[:50]  # 限制长度
+        filename = f"{safe_title}_{timestamp}.pdf"
+        
+        # 上传文件
+        file_key = storage_service.upload_file(pdf_bytes, filename)
+        
+        if not file_key:
+            raise ValueError("PDF 上传到 MinIO 失败")
+        
+        # Step 6: 返回结果（包含 file_key 和 project_id）
         result_data = {
-            "success": True,
-            "data": result.model_dump()
+            "status": "completed",
+            "file_key": file_key,
+            "size": len(pdf_bytes),
+            "filename": filename,
+            "data": result.model_dump()  # 保留原始数据用于兼容
         }
         
         if project_id:
@@ -126,7 +160,7 @@ async def generate_cheat_sheet_task(
         return result_data
     except Exception as e:
         return {
-            "success": False,
+            "status": "failed",
             "error": str(e),
             "traceback": traceback.format_exc()
         }
@@ -137,14 +171,14 @@ async def generate_pdf_task(
     cheat_sheet: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    ARQ 任务：生成 PDF
+    ARQ 任务：生成 PDF 并上传到 MinIO
     
     Args:
         ctx: ARQ 上下文
         cheat_sheet: 小抄数据字典
         
     Returns:
-        任务结果（包含 PDF 的 base64 编码）
+        任务结果（包含 file_key）
     """
     try:
         if not cheat_sheet:
@@ -159,20 +193,31 @@ async def generate_pdf_task(
         # 生成 PDF
         pdf_bytes = await generate_pdf_from_html(html_content)
         
-        # 将 PDF 编码为 base64
-        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        # 上传到 MinIO
+        storage_service = get_storage_service()
         
-        # 返回结果
+        # 生成文件名（使用小抄标题和时间戳）
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_title = "".join(c for c in cheat_sheet_obj.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_title = safe_title.replace(' ', '_')[:50]  # 限制长度
+        filename = f"{safe_title}_{timestamp}.pdf"
+        
+        # 上传文件
+        file_key = storage_service.upload_file(pdf_bytes, filename)
+        
+        if not file_key:
+            raise ValueError("PDF 上传到 MinIO 失败")
+        
+        # 返回结果（包含 file_key）
         return {
-            "success": True,
-            "data": {
-                "pdf_base64": pdf_base64,
-                "size": len(pdf_bytes)
-            }
+            "status": "completed",
+            "file_key": file_key,
+            "size": len(pdf_bytes),
+            "filename": filename
         }
     except Exception as e:
         return {
-            "success": False,
+            "status": "failed",
             "error": str(e),
             "traceback": traceback.format_exc()
         }
@@ -209,6 +254,9 @@ class WorkerSettings:
 async def startup(ctx):
     """Worker 启动时执行"""
     print("🚀 ARQ Worker 启动...")
+    # 确保 MinIO Bucket 存在
+    storage_service = get_storage_service()
+    storage_service.ensure_bucket()
 
 
 async def shutdown(ctx):

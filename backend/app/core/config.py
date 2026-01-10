@@ -22,6 +22,12 @@ class Settings:
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     
+    # MinIO/S3 配置
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "cheat-sheets")
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "http://localhost:9000")
+    
     @classmethod
     def validate(cls) -> None:
         """验证必需的配置项"""

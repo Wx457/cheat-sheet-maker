@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from arq.jobs import Job
 
+from app.services.storage import get_storage_service
+
 router = APIRouter()
 
 
@@ -16,6 +18,7 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    download_url: Optional[str] = None  # 预签名下载链接（如果任务完成且包含 file_key）
 
 
 @router.get("/api/task/{task_id}", response_model=TaskStatusResponse)
@@ -56,11 +59,22 @@ async def get_task_status(
         # 如果任务完成，获取结果
         result = None
         error = None
+        download_url = None
         
         if status == 'complete':
             try:
                 job_result = await job.result()
                 result = job_result
+                
+                # 如果结果包含 file_key，生成预签名 URL
+                if isinstance(result, dict) and result.get('file_key'):
+                    file_key = result.get('file_key')
+                    storage_service = get_storage_service()
+                    download_url = storage_service.get_presigned_url(file_key)
+                    
+                    # 将 download_url 添加到结果中
+                    if download_url:
+                        result['download_url'] = download_url
             except Exception as e:
                 error = str(e)
         elif status == 'not_found':
@@ -73,7 +87,8 @@ async def get_task_status(
             task_id=task_id,
             status=mapped_status,
             result=result,
-            error=error
+            error=error,
+            download_url=download_url
         )
     except HTTPException:
         raise
