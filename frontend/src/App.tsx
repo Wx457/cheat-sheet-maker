@@ -104,19 +104,6 @@ function App() {
     setCheatSheet(null)
   }
 
-  const getStepProgress = () => {
-    switch (currentStep) {
-      case 'setup':
-        return 1
-      case 'outline':
-        return 2
-      case 'result':
-        return 3
-      default:
-        return 1
-    }
-  }
-
   return (
     <div className="page">
       <header className="page-header no-print">

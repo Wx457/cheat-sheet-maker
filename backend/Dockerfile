@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 RUN playwright install-deps
 
+# 将前端构建产物复制到镜像中
+COPY frontend/dist /app/static
+
 # 复制其余代码
 COPY . .
 

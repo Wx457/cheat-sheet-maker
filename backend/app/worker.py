@@ -11,9 +11,8 @@ from arq.connections import RedisSettings
 from arq.worker import Worker
 
 from app.services.llm import generate_outline, generate_cheat_sheet
-from app.services.pdf_service import generate_pdf_from_html
+from app.services.pdf_service import generate_pdf_via_browser
 from app.services.storage import get_storage_service
-from app.utils.html_generator import generate_cheat_sheet_html
 from app.schemas import (
     GenerateSheetRequest,
     CheatSheetSchema,
@@ -124,11 +123,11 @@ async def generate_cheat_sheet_task(
             project_id = str(insert_result.inserted_id)
             client.close()
         
-        # Step 3: 生成 HTML
-        html_content = generate_cheat_sheet_html(result)
-        
-        # Step 4: 生成 PDF
-        pdf_bytes = await generate_pdf_from_html(html_content)
+        # Step 3: 生成 PDF（使用 React 前端渲染）
+        # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
+        # PDF 服务会访问 React 静态页面并注入数据
+        cheat_sheet_dict = result.model_dump()
+        pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
         
         # Step 5: 上传到 MinIO
         storage_service = get_storage_service()
@@ -184,14 +183,12 @@ async def generate_pdf_task(
         if not cheat_sheet:
             raise ValueError("缺少 cheat_sheet 数据")
         
-        # 转换为 CheatSheetSchema
+        # 验证数据格式（可选）
         cheat_sheet_obj = CheatSheetSchema(**cheat_sheet)
         
-        # 生成 HTML
-        html_content = generate_cheat_sheet_html(cheat_sheet_obj)
-        
-        # 生成 PDF
-        pdf_bytes = await generate_pdf_from_html(html_content)
+        # 生成 PDF（使用 React 前端渲染）
+        # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
+        pdf_bytes = await generate_pdf_via_browser(cheat_sheet)
         
         # 上传到 MinIO
         storage_service = get_storage_service()

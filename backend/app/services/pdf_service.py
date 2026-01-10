@@ -1,23 +1,33 @@
 """
 PDF 生成服务
-使用 Playwright 调用 Headless Chrome 将网页转换为 PDF
+使用 Playwright 访问 React 静态页面并注入数据生成 PDF
 """
+import json
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from typing import Optional
+from typing import Optional, Dict, Any
+
+from app.core.config import settings
 
 
-async def generate_pdf_from_html(html_content: str) -> bytes:
+# 前端 URL 配置（使用 HashRouter，所以是 #/print）
+FRONTEND_URL = "http://localhost:8000/static/index.html#/print"
+
+
+async def generate_pdf_via_browser(data_json: Dict[str, Any]) -> bytes:
     """
-    从 HTML 内容直接生成 PDF
+    通过访问 React 静态页面并注入数据生成 PDF
     
     Args:
-        html_content: 完整的 HTML 字符串
+        data_json: CheatSheet 数据的字典（包含 title, sections 等）
         
     Returns:
         PDF 文件的二进制数据
         
     Note:
-        直接注入 HTML，不走网络请求，无需访问 localhost
+        1. 访问本地托管的 React 应用
+        2. 将数据注入到 window.CHEAT_SHEET_DATA
+        3. 等待页面渲染完成（通过 #render-complete 标记）
+        4. 生成 PDF
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -31,18 +41,86 @@ async def generate_pdf_from_html(html_content: str) -> bytes:
             ]
         )
         try:
-            page = await browser.new_page()
+            page = await browser.new_page(
+                viewport={'width': 1920, 'height': 1080},
+                device_scale_factor=1,
+            )
             
-            # 【核心修改】直接注入 HTML，不走网络请求，无需 Localhost
+            # Step 1: 访问前端页面
+            print(f"📄 访问前端页面: {FRONTEND_URL}")
+            await page.goto(FRONTEND_URL, wait_until="networkidle", timeout=30000)
+            
+            # Step 2: 注入数据到 window.CHEAT_SHEET_DATA
+            print(f"💉 注入数据到 window.CHEAT_SHEET_DATA")
+            # 使用 evaluate 直接注入对象（Playwright 会自动序列化）
+            await page.evaluate(f"window.CHEAT_SHEET_DATA = {json.dumps(data_json, ensure_ascii=False)}")
+            
+            # Step 3: 等待渲染完成（等待 #render-complete 标记出现）
+            print("⏳ 等待页面渲染完成...")
+            try:
+                await page.wait_for_selector("#render-complete", timeout=10000)
+                print("✅ 页面渲染完成标记已检测到")
+            except Exception as e:
+                print(f"⚠️ 警告: 未检测到渲染完成标记 (#render-complete)，继续生成 PDF: {e}")
+            
+            # Step 4: 额外等待一小段时间，确保 KaTeX 等动态内容完全渲染
+            await page.wait_for_timeout(1000)
+            
+            # Step 5: 生成 PDF
+            print("📄 开始生成 PDF...")
+            pdf_bytes = await page.pdf(
+                format="A4",
+                print_background=True,
+                margin={
+                    'top': '0mm',
+                    'right': '0mm',
+                    'bottom': '0mm',
+                    'left': '0mm',
+                }
+            )
+            print(f"✅ PDF 生成完成，大小: {len(pdf_bytes)} bytes")
+            return pdf_bytes
+            
+        finally:
+            await browser.close()
+
+
+# 保留旧函数以保持向后兼容（如果还有其他地方调用）
+async def generate_pdf_from_html(html_content: str) -> bytes:
+    """
+    从 HTML 内容直接生成 PDF（已废弃，建议使用 generate_pdf_via_browser）
+    
+    Args:
+        html_content: 完整的 HTML 字符串
+        
+    Returns:
+        PDF 文件的二进制数据
+        
+    Deprecated:
+        此方法已废弃，请使用 generate_pdf_via_browser 方法
+    """
+    print("⚠️ 警告: generate_pdf_from_html 已废弃，请使用 generate_pdf_via_browser")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+            ]
+        )
+        try:
+            page = await browser.new_page()
             await page.set_content(html_content, wait_until="networkidle")
             
-            # 等待 KaTeX 渲染 (给 JS 一点时间把公式画出来)
             try:
                 await page.wait_for_selector('.katex', timeout=2000)
             except:
-                pass  # 如果没公式也无所谓
+                print("⚠️ 警告: 页面中未检测到已渲染的 KaTeX 公式")
             
-            # 额外等待一小段时间，确保所有动态内容都已渲染
             await page.wait_for_timeout(1000)
 
             pdf_bytes = await page.pdf(
@@ -56,7 +134,7 @@ async def generate_pdf_from_html(html_content: str) -> bytes:
 
 
 class PDFService:
-    """PDF 生成服务类"""
+    """PDF 生成服务类（已废弃，建议直接使用 generate_pdf_via_browser 函数）"""
     
     def __init__(self):
         """初始化 PDF 服务"""
@@ -91,27 +169,20 @@ class PDFService:
         Note:
             每次请求都会创建一个新的 context，确保并发安全
         """
-        # 确保浏览器已启动
         await self._ensure_browser()
         
-        # 为每个请求创建新的 context，确保并发安全
         context: BrowserContext = await self._browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             device_scale_factor=1,
         )
         
         try:
-            # 创建新页面
             page: Page = await context.new_page()
             
             try:
-                # 访问 URL 并等待页面加载完成
                 await page.goto(url, wait_until="networkidle", timeout=30000)
-                
-                # 等待一小段时间，确保所有动态内容都已渲染
                 await page.wait_for_timeout(1000)
                 
-                # 生成 PDF
                 pdf_bytes = await page.pdf(
                     format="A4",
                     print_background=True,
@@ -126,11 +197,9 @@ class PDFService:
                 return pdf_bytes
                 
             finally:
-                # 关闭页面
                 await page.close()
                 
         finally:
-            # 关闭 context（重要：确保资源释放）
             await context.close()
     
     async def close(self):
@@ -153,4 +222,3 @@ def get_pdf_service() -> PDFService:
     if _pdf_service is None:
         _pdf_service = PDFService()
     return _pdf_service
-

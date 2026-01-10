@@ -3,128 +3,96 @@ import re
 import html
 from app.schemas.cheat_sheet import CheatSheetSchema
 
-def clean_latex_content(content: str) -> str:
+class LatexProtector:
     """
-    模拟前端 react-markdown 的清洗逻辑：
-    1. 把 \[ \] 变成 $$ $$
-    2. 把 \( \) 变成 $ $
-    3. 处理换行符
-    
-    安全改进：
-    - 限制正则匹配次数，防止 ReDoS 攻击
-    - 避免在 LaTeX 公式内部替换换行符
+    【围栏策略核心类】
+    用于在 Markdown 渲染前保护 LaTeX 公式，防止反斜杠被吞或下划线被误转义。
+    """
+    def __init__(self):
+        self.map = {}
+        self.counter = 0
+
+    def protect(self, content: str) -> str:
+        # 1. 保护块级公式 $$...$$ 和 \[...\]
+        # re.DOTALL 允许 . 匹配换行符
+        # non-greedy 匹配 .*?
+        def replace_block(match):
+            key = f"__LATEX_BLOCK_{self.counter}__"
+            self.map[key] = match.group(0) # 原样保存，一个字符都不动
+            self.counter += 1
+            return key
+        
+        content = re.sub(r'(\$\$.*?\$\$|\\\[.*?\\\])', replace_block, content, flags=re.DOTALL)
+
+        # 2. 保护行内公式 $...$ 和 \(...\)
+        def replace_inline(match):
+            key = f"__LATEX_INLINE_{self.counter}__"
+            self.map[key] = match.group(0)
+            self.counter += 1
+            return key
+
+        # 注意：这里要小心不匹配到 \$ (转义的美元符号)
+        # 匹配 \(...\) OR $...$
+        content = re.sub(r'(\\\(.*?\ উন্ন\)|\$[^\$]+?\$)', replace_inline, content, flags=re.DOTALL)
+        
+        return content
+
+    def restore(self, content: str) -> str:
+        # 还原所有占位符
+        for key, value in self.map.items():
+            content = content.replace(key, value)
+        return content
+
+def clean_content_with_protection(content: str) -> str:
+    """
+    通用清洗函数：适用于 Text 和 Equation 类型
     """
     if not content:
         return ""
-
-    # 安全限制：最大处理长度，防止恶意输入
-    MAX_CONTENT_LENGTH = 100000  # 100KB
-    if len(content) > MAX_CONTENT_LENGTH:
-        content = content[:MAX_CONTENT_LENGTH]
-        print(f"⚠️ 内容过长，已截断至 {MAX_CONTENT_LENGTH} 字符")
-
-    # 1. 处理块级公式 \[ ... \] -> $$ ... $$
-    # re.DOTALL 让 . 可以匹配换行符
-    # 限制匹配次数，防止 ReDoS
-    content = re.sub(
-        r'\\\[(.*?)\\\]', 
-        r'$$\1$$', 
-        content, 
-        flags=re.DOTALL,
-        count=1000  # 最多处理 1000 个块级公式
+    
+    # 0. 初始化保护器
+    protector = LatexProtector()
+    
+    # 1. 【关键】先把所有 LaTeX 公式挖走！
+    # 此时 content 里的公式变成了 __LATEX_INLINE_0__
+    protected_content = protector.protect(content)
+    
+    # 2. 处理普通文本的换行
+    # 只有不在公式里的 \\ 才会变成 <br>。
+    # 因为公式已经被换成了占位符，这里怎么 replace 都不怕坏事。
+    protected_content = protected_content.replace(r"\\", "<br>")
+    
+    # 3. Markdown 渲染
+    # 处理 **Bold**, *Italic*, List 等
+    html_content = markdown.markdown(
+        protected_content, 
+        extensions=['extra', 'nl2br', 'codehilite']
     )
-
-    # 2. 处理行内公式 \( ... \) -> $ ... $
-    # 限制匹配次数，防止 ReDoS
-    content = re.sub(
-        r'\\\((.*?)\\\)', 
-        r'$\1$', 
-        content, 
-        flags=re.DOTALL,
-        count=1000  # 最多处理 1000 个行内公式
-    )
-
-    # 3. 处理 LaTeX 里的换行符 \\ -> HTML <br>
-    # 改进：只在非公式区域替换，避免破坏矩阵环境
-    # 使用负向前瞻，确保 \\ 不在 $...$ 或 $$...$$ 内部
-    # 简单策略：先标记公式区域，再替换非公式区域的 \\
-    # 为了简化，我们使用更保守的策略：只替换不在公式标记附近的 \\
-    # 注意：这个策略可能不够完美，但对于 Cheat Sheet 场景足够
-    # 更安全的做法是使用 LaTeX 解析器，但会增加复杂度
     
-    # 临时标记公式区域
-    formula_placeholders = []
-    formula_pattern = r'\$\$.*?\$\$|\$.*?\$'
+    # 4. 【关键】把公式填回去
+    final_content = protector.restore(html_content)
     
-    def replace_formula(match):
-        placeholder = f"__FORMULA_{len(formula_placeholders)}__"
-        formula_placeholders.append(match.group(0))
-        return placeholder
-    
-    # 先替换所有公式为占位符
-    content = re.sub(formula_pattern, replace_formula, content, flags=re.DOTALL)
-    
-    # 在非公式区域替换 \\
-    content = content.replace(r"\\", "<br>")
-    
-    # 恢复公式
-    for i, formula in enumerate(formula_placeholders):
-        content = content.replace(f"__FORMULA_{i}__", formula)
-
-    return content
+    return final_content
 
 def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
-    # --- 1. 构建内容 HTML ---
     sections_html = ""
     
     for section in data.sections:
         items_html = ""
         for item in section.items:
-            # 第一步：清洗内容
             raw_content = item.content
-            cleaned_content = clean_latex_content(raw_content)
             
-            # A. 处理数学公式 (Equation)
+            # 统一使用“围栏策略”清洗
+            # 不再区分 equation/text 的清洗逻辑，因为 protector 会自动识别公式
+            cleaned_html = clean_content_with_protection(raw_content)
+            
             if item.type == "equation":
-                # 强制包裹 $$ (如果 LLM 给的是裸公式)
-                if not cleaned_content.strip().startswith("$$"):
-                    cleaned_content = f"$${cleaned_content}$$"
-                
-                items_html += f'<div class="item equation">{cleaned_content}</div>'
-            
-            # B. 处理文本 (Text/Definition)
+                # Equation 类型：居中显示
+                items_html += f'<div class="item equation">{cleaned_html}</div>'
             else:
-                # 第二步：Markdown 转 HTML
-                # 这会把 **Bold** 变成 <strong>Bold</strong>
-                # extensions=['extra'] 支持表格、脚注等高级语法
-                # 注意：markdown 库默认会转义 HTML 标签，但为了安全，我们使用 safe_mode
-                # 在较新版本的 markdown 中，safe_mode 已被弃用，改用 escape 扩展
-                html_content = markdown.markdown(
-                    cleaned_content, 
-                    extensions=['extra', 'nl2br', 'codehilite'],
-                    # 确保 HTML 标签被转义（除了我们允许的 Markdown 语法）
-                )
-                
-                # 额外安全措施：转义任何可能残留的脚本标签
-                # 虽然 markdown 应该已经处理了，但这是双重保险
-                html_content = re.sub(
-                    r'<script[^>]*>.*?</script>',
-                    '',
-                    html_content,
-                    flags=re.IGNORECASE | re.DOTALL
-                )
-                html_content = re.sub(
-                    r'javascript:',
-                    '',
-                    html_content,
-                    flags=re.IGNORECASE
-                )
-                
-                # 修复：有时候 markdown 会把公式包在 <p> 标签里导致样式间距问题
-                # 我们这里不做特殊处理，交给 CSS 控制
-                items_html += f'<div class="item text">{html_content}</div>'
+                # Text 类型：正常显示
+                items_html += f'<div class="item text">{cleaned_html}</div>'
 
-        # 转义 section.title 防止 XSS 注入
         escaped_title = html.escape(section.title)
         
         sections_html += f"""
@@ -134,8 +102,6 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
         </div>
         """
 
-    # --- 2. 组装完整 HTML ---
-    # 转义 title 防止 XSS 注入
     escaped_title = html.escape(data.title)
     
     full_html = f"""
@@ -149,12 +115,7 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
         
         <style>
-            /* --- A4 纸张布局 (保持你满意的排版) --- */
-            @page {{
-                size: A4 portrait;
-                margin: 10mm;
-            }}
-            
+            @page {{ size: A4 portrait; margin: 10mm; }}
             body {{
                 font-family: "Helvetica Neue", Arial, sans-serif;
                 font-size: 8pt; 
@@ -164,16 +125,12 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
                 padding: 10px;
                 background: white;
             }}
-
-            /* 多栏布局 */
             #content {{
                 column-count: 2;
                 column-gap: 5mm;
                 column-fill: balance;
                 width: 100%;
             }}
-
-            /* Section 盒子 */
             .section {{
                 break-inside: avoid;
                 margin-bottom: 10px;
@@ -182,7 +139,6 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
                 border-radius: 4px;
                 background-color: #fcfcfc;
             }}
-
             .section h3 {{
                 font-size: 10pt;
                 font-weight: bold;
@@ -192,21 +148,18 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
                 border-bottom: 1px solid #eee;
                 color: #333;
             }}
-            
-            /* 内容微调 */
             .item {{ margin-bottom: 4px; }}
-            
-            /* 文本样式：去除 Markdown <p> 的默认边距，防止太散 */
             .item.text p {{ margin: 0 0 4px 0; }}
             .item.text {{ text-align: justify; }}
-
-            /* 公式样式：红色字体的克星 */
+            
             .item.equation {{
                 text-align: center;
                 margin: 4px 0;
+                overflow-x: auto;
             }}
+            /* 确保公式和文本混排时对齐 */
+            .item p {{ display: inline; }}
             
-            /* 强制 KaTeX 样式覆盖 */
             .katex {{ font-size: 1.05em !important; }}
         </style>
     </head>
@@ -216,18 +169,16 @@ def generate_cheat_sheet_html(data: CheatSheetSchema) -> str:
         </div>
 
         <script>
-            // --- 关键：KaTeX 自动渲染配置 ---
             document.addEventListener("DOMContentLoaded", function() {{
                 renderMathInElement(document.body, {{
-                    // 这里定义了 KaTeX 应该寻找哪些符号来渲染公式
+                    // 这里定义了所有可能的定界符
                     delimiters: [
                         {{left: '$$', right: '$$', display: true}},
                         {{left: '$', right: '$', display: false}},
                         {{left: '\\(', right: '\\)', display: false}},
                         {{left: '\\[', right: '\\]', display: true}}
                     ],
-                    throwOnError : false,
-                    ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"]
+                    throwOnError : false
                 }});
             }});
         </script>

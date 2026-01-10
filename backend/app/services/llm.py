@@ -202,6 +202,7 @@ def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamTy
         
         data = json.loads(repaired_json)
         
+        
         # 确保 topics 数量在合理范围内（虽然 Prompt 限制了，但为了保险可以做个截断，或者就这样留着）
         return OutlineResponse(**data)
 
@@ -246,13 +247,13 @@ def _calculate_budget(page_limit: str, topics: List[TopicInput]) -> Dict[str, in
     """
     # 1. 确定总预算 (Total Pool)
     if page_limit == "1_side":
-        total_items = 25
-    elif page_limit == "1_page":
         total_items = 45
+    elif page_limit == "1_page":
+        total_items = 85
     elif page_limit == "2_pages":
-        total_items = 80
+        total_items = 120
     else:  # unlimited
-        total_items = 160
+        total_items = 200
     
     # 2. 计算总权重分母
     total_score = sum(t.relevance_score for t in topics)
@@ -421,15 +422,13 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
                 1 item = 1 big O complexity analysis for 1 algorithm
         - "unlimited": Detailed mode with examples and code.
 
-        4. Level Adjustment (Based on academic_level):
+        3. Level Adjustment (Based on academic_level):
         - "graduate":
             * For STEM: Prioritize rigorous **proofs, derivations, and complexity analysis**. Skip basic calculation steps.
             * For Non-STEM: Focus on **critical theory, methodology, and historiography**. Analyze nuances rather than just listing facts.
         - "undergraduate":
             * For STEM: Focus on **application and calculation**. Show standard algorithms and solving procedures.
             * For Non-STEM: Focus on **core arguments, key definitions, and cause-effect relationships**.
-        - "high_school":
-            * General: Focus on **foundational concepts and step-by-step simplification**. Use analogies and mnemonics to explain basic terms.
 
         4. Output Format: You must return pure JSON conforming to the following Schema:
         {{

@@ -1,6 +1,9 @@
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from arq.connections import create_pool, RedisSettings
 
@@ -54,6 +57,24 @@ app.include_router(generate_router)
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(plugin_router, tags=["Plugin"])
 app.include_router(task_router, tags=["Task"])
+
+# 挂载静态文件（前端构建产物）
+# 注意：static 目录应该在 Dockerfile 构建时从 frontend/dist 复制过来
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    # 挂载根目录，用于访问 index.html
+    app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
+    
+    # 挂载 assets 目录，用于访问 JS/CSS 等资源文件
+    # Vite 构建的 HTML 中资源路径是 /assets/xxx，所以需要单独挂载
+    assets_dir = static_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        print(f"✅ Assets 目录已挂载: {assets_dir}")
+    
+    print(f"✅ 静态文件已挂载: {static_dir}")
+else:
+    print(f"⚠️ 警告: 静态文件目录不存在: {static_dir}，PDF 生成功能可能无法正常工作")
 
 
 @app.get("/health")
