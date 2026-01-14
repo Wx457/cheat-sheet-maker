@@ -21,6 +21,50 @@ from app.schemas import (
 from app.core.config import settings
 
 
+# 数据清洗函数
+
+def normalize_equation(content: str) -> str:
+    """强制给公式加上 $$ 包裹"""
+    if not content: 
+        return ""
+    content = content.strip()
+    
+    # 移除可能存在的 \[ \]
+    if content.startswith(r"\[") and content.endswith(r"\]"):
+        content = content[2:-2].strip()
+        
+    # 如果已经是 $$ 包裹，直接返回
+    if content.startswith("$$") and content.endswith("$$"):
+        return content
+        
+    # 如果是行内 $ 包裹，改成 $$
+    if content.startswith("$") and content.endswith("$"):
+        return "$$" + content[1:-1] + "$$"
+        
+    # 裸奔的 LaTeX，加上 $$
+    return f"$${content}$$"
+
+
+def clean_equation_data(content_dict: Dict[str, Any]) -> None:
+    """
+    清洗 cheat sheet 数据中的公式内容
+    
+    Args:
+        content_dict: CheatSheet 数据的字典（会被原地修改）
+    """
+    try:
+        print("正在清洗公式数据...")
+        for section in content_dict.get("sections", []):
+            for item in section.get("items", []):
+                if item.get("type") == "equation":
+                    raw = item.get("content", "")
+                    # 洗干净再放回去
+                    item["content"] = normalize_equation(raw)
+        print("✅ 公式数据清洗完成")
+    except Exception as e:
+        print(f"⚠️ 清洗数据时出错 (非致命): {e}")
+
+
 # ARQ 任务函数定义
 
 async def generate_outline_task(
@@ -74,8 +118,8 @@ async def generate_cheat_sheet_task(
     流程：
     1. LLM 生成小抄内容
     2. 保存到数据库（如果包含 _metadata）
-    3. 生成 HTML
-    4. 生成 PDF
+    3. 清洗数据（清洗公式格式）
+    4. 生成 PDF（使用 React 前端渲染）
     5. 上传到 MinIO
     6. 返回包含 file_key 的结果
     
@@ -123,10 +167,13 @@ async def generate_cheat_sheet_task(
             project_id = str(insert_result.inserted_id)
             client.close()
         
-        # Step 3: 生成 PDF（使用 React 前端渲染）
+        # Step 3: 清洗数据（清洗 LLM 返回的公式格式）
+        cheat_sheet_dict = result.model_dump()
+        clean_equation_data(cheat_sheet_dict)
+        
+        # Step 4: 生成 PDF（使用 React 前端渲染）
         # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
         # PDF 服务会访问 React 静态页面并注入数据
-        cheat_sheet_dict = result.model_dump()
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
         
         # Step 5: 上传到 MinIO
@@ -185,6 +232,9 @@ async def generate_pdf_task(
         
         # 验证数据格式（可选）
         cheat_sheet_obj = CheatSheetSchema(**cheat_sheet)
+        
+        # 清洗数据（清洗公式格式）
+        clean_equation_data(cheat_sheet)
         
         # 生成 PDF（使用 React 前端渲染）
         # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务

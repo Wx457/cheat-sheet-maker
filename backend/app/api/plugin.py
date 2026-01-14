@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.rag_service import get_rag_service
 from app.services.cleaner import clean_raw_text
+from app.services.pdf_service import generate_pdf_via_browser
 from app.core.config import settings
 
 router = APIRouter()
@@ -341,9 +342,8 @@ async def download_cheat_sheet(project_id: str) -> Response:
     
     流程：
     1. 从数据库获取项目数据（确保数据已存库）
-    2. 生成 HTML 内容（包含 Markdown 和 LaTeX 渲染）
-    3. 使用 Playwright 直接渲染 HTML 并生成 PDF
-    4. 返回 PDF 文件流
+    2. 使用 React 前端渲染引擎生成 PDF（通过 pdf_service.generate_pdf_via_browser）
+    3. 返回 PDF 文件流
     """
     try:
         # 1. 从数据库获取项目数据，确保数据已存库
@@ -382,16 +382,12 @@ async def download_cheat_sheet(project_id: str) -> Response:
         
         client.close()
         
-        # 2. 将字典转换为 CheatSheetSchema 对象
-        cheat_sheet = CheatSheetSchema(**cheat_sheet_data)
+        # 2. 使用 React 前端渲染引擎生成 PDF
+        # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
+        # PDF 服务会访问 React 静态页面并注入数据
+        pdf_bytes = await generate_pdf_via_browser(cheat_sheet_data)
         
-        # 3. 生成 HTML (这一步解决了格式乱码和 Markdown 渲染)
-        html_content = generate_cheat_sheet_html(cheat_sheet)
-        
-        # 4. 生成 PDF (这一步解决了 Localhost 连接被拒问题)
-        pdf_bytes = await generate_pdf_from_html(html_content)
-        
-        # 5. 返回 PDF 文件流
+        # 3. 返回 PDF 文件流
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
