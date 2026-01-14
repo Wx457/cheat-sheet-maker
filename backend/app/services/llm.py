@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import asyncio
 import google.generativeai as genai
 from google.api_core import retry, exceptions
 from dotenv import load_dotenv
@@ -347,10 +348,31 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
     rag_context_str = ""
     
     if request.selected_topics:
-        # 如果有选定主题，对每个主题进行 RAG 检索
-        for topic in request.selected_topics:
-            results = await rag_service.search_context(topic.title, k=5)
-            
+        # ========== [性能优化] 并行检索：使用 asyncio.gather 同时检索所有主题，而非顺序串行 ==========
+        # 如果有选定主题，对每个主题进行 RAG 检索（并行执行以提高性能）
+        topic_count = len(request.selected_topics)
+        
+        # ========== [性能监控 - 可删除] ==========
+        parallel_search_start = time.time()
+        print(f"⏱️ [性能监控] 开始并行检索 {topic_count} 个主题...")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # 创建所有主题的搜索任务
+        search_tasks = [
+            rag_service.search_context(topic.title, k=5)
+            for topic in request.selected_topics
+        ]
+        
+        # 并行执行所有搜索任务
+        all_results = await asyncio.gather(*search_tasks)
+        
+        # ========== [性能监控 - 可删除] ==========
+        parallel_search_elapsed = time.time() - parallel_search_start
+        print(f"⏱️ [性能监控] 并行检索 {topic_count} 个主题完成，耗时: {parallel_search_elapsed:.2f} 秒（平均每个主题: {parallel_search_elapsed/topic_count:.2f} 秒）")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # 按顺序处理结果（保持输出格式一致）
+        for topic, results in zip(request.selected_topics, all_results):
             if results:
                 # 拼接该主题的 RAG 上下文
                 rag_context_str += f"\n--- Context for topic '{topic.title}' ---\n"
@@ -358,6 +380,7 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
                     rag_context_str += f"Source: {result['source']}\n"
                     rag_context_str += f"Content: {result['content']}\n"
                     rag_context_str += "---------------------------------------\n"
+        # ========== [性能优化] 并行检索结束 ==========
     else:
         # 如果没有选定主题，使用通用查询获取知识库内容
         # 使用用户背景或课程类型作为查询词
