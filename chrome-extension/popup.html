@@ -183,6 +183,34 @@
       font-size: 13px;
       margin: 0;
     }
+    
+    /* 自定义主题标记 */
+    .topic-custom-tag {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 6px;
+      background-color: #e8f0fe;
+      color: #1a73e8;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    
+    /* 自定义主题输入框样式 */
+    .custom-topic-group input:focus {
+      border-color: #1a73e8;
+      outline: none;
+    }
+    
+    .custom-topic-group button:hover {
+      background-color: #1557b0 !important;
+    }
+    
+    .custom-topic-group button:disabled {
+      background-color: #dadce0 !important;
+      color: #999 !important;
+      cursor: not-allowed !important;
+    }
   </style>
 </head>
 <body>
@@ -254,6 +282,25 @@
   <div id="view-outline" style="display:none;">
     <h4>检测到的考试主题 (请勾选)</h4>
     <div id="outline-list"></div>
+    
+    <!-- 自定义主题输入 -->
+    <div class="custom-topic-group" style="margin-top: 16px; margin-bottom: 16px;">
+      <div style="display: flex; gap: 8px;">
+        <input 
+          type="text" 
+          id="customTopicInput" 
+          placeholder="添加自定义主题..." 
+          style="flex: 1; padding: 8px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box;"
+        />
+        <button 
+          id="btnAddCustomTopic" 
+          style="padding: 8px 16px; border: none; border-radius: 4px; background-color: #1a73e8; color: white; cursor: pointer; font-weight: 600;"
+        >
+          +
+        </button>
+      </div>
+    </div>
+    
     <div class="button-group">
       <button id="btnBack" class="secondary-btn">返回修改</button>
       <button id="btnConfirmGenerate" class="primary-btn">确认并生成</button>

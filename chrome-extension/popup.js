@@ -1,6 +1,7 @@
 // 全局状态管理
 let currentProjectId = null // 暂存第一步分析后的项目 ID（如果需要）
 let currentOutlineData = null // 暂存分析结果
+let extendedTopics = [] // 存储所有主题（AI检测的 + 自定义的）
 
 // 获取页面元素
 const viewForm = document.getElementById('view-form')
@@ -9,6 +10,8 @@ const statusEl = document.getElementById('status')
 const outlineList = document.getElementById('outline-list')
 const resultArea = document.getElementById('resultArea')
 const downloadLink = document.getElementById('downloadLink')
+const customTopicInput = document.getElementById('customTopicInput')
+const btnAddCustomTopic = document.getElementById('btnAddCustomTopic')
 
 // 按钮元素
 const btnSaveOnly = document.getElementById('btnSaveOnly')
@@ -241,16 +244,31 @@ async function callAnalyzeAPI(content, formData, url) {
   }
 }
 
-// 渲染主题复选框列表
+// 渲染主题复选框列表（支持显示扩展主题列表，包括自定义主题）
 function renderOutlineList(topics) {
   outlineList.innerHTML = '' // 清空现有内容
   
-  if (!topics || topics.length === 0) {
+  // 初始化 extendedTopics：将 AI 检测的主题转换为扩展格式
+  if (topics && topics.length > 0) {
+    extendedTopics = topics.map(t => ({ ...t, isCustom: false }))
+  } else {
+    extendedTopics = []
+  }
+  
+  // 重新渲染所有主题（包括自定义的）
+  renderExtendedTopics()
+}
+
+// 渲染扩展主题列表（包括 AI 检测的和自定义的）
+function renderExtendedTopics() {
+  outlineList.innerHTML = '' // 清空现有内容
+  
+  if (extendedTopics.length === 0) {
     outlineList.innerHTML = '<p style="color: #999; text-align: center;">未检测到主题</p>'
     return
   }
   
-  topics.forEach((topic, index) => {
+  extendedTopics.forEach((topic, index) => {
     const item = document.createElement('div')
     item.className = 'outline-item'
     
@@ -259,10 +277,23 @@ function renderOutlineList(topics) {
     checkbox.id = `topic-${index}`
     checkbox.value = topic.title
     checkbox.checked = true // 默认全选
+    checkbox.dataset.isCustom = topic.isCustom ? 'true' : 'false'
     
     const label = document.createElement('label')
     label.htmlFor = `topic-${index}`
-    label.textContent = `${topic.title} (相关性: ${(topic.relevance_score * 100).toFixed(0)}%)`
+    
+    // 构建标签文本
+    if (!topic.isCustom) {
+      // AI 检测的主题：显示相关性分数
+      label.textContent = `${topic.title} (相关性: ${(topic.relevance_score * 100).toFixed(0)}%)`
+    } else {
+      // 自定义主题：显示标题 + 自定义标记
+      label.appendChild(document.createTextNode(topic.title))
+      const customTag = document.createElement('span')
+      customTag.className = 'topic-custom-tag'
+      customTag.textContent = '自定义'
+      label.appendChild(customTag)
+    }
     
     item.appendChild(checkbox)
     item.appendChild(label)
@@ -270,14 +301,52 @@ function renderOutlineList(topics) {
   })
 }
 
-// 收集选中的主题
+// 添加自定义主题
+function handleAddCustomTopic() {
+  const trimmed = customTopicInput.value.trim()
+  
+  // 验证输入
+  if (!trimmed) {
+    return
+  }
+  
+  // 检查是否已存在
+  if (extendedTopics.some(t => t.title === trimmed)) {
+    customTopicInput.value = ''
+    return
+  }
+  
+  // 计算 AI 检测主题的平均权重
+  const aiTopics = extendedTopics.filter(t => !t.isCustom)
+  const avgScore = aiTopics.length > 0
+    ? aiTopics.reduce((sum, t) => sum + t.relevance_score, 0) / aiTopics.length
+    : 0.5  // 如果没有 AI 主题，默认使用 0.5
+  
+  // 添加自定义主题
+  const newTopic = {
+    title: trimmed,
+    relevance_score: avgScore,
+    isCustom: true
+  }
+  
+  extendedTopics.push(newTopic)
+  customTopicInput.value = ''
+  
+  // 重新渲染列表
+  renderExtendedTopics()
+  
+  // 更新添加按钮状态
+  updateAddButtonState()
+}
+
+// 收集选中的主题（包括自定义主题）
 function collectSelectedTopics() {
   const checkboxes = outlineList.querySelectorAll('input[type="checkbox"]:checked')
   const selectedTopics = []
   
   checkboxes.forEach(checkbox => {
-    // 从 currentOutlineData 中找到对应的 topic 以获取 relevance_score
-    const topic = currentOutlineData.topics.find(t => t.title === checkbox.value)
+    // 从 extendedTopics 中找到对应的 topic（包括自定义的）
+    const topic = extendedTopics.find(t => t.title === checkbox.value)
     if (topic) {
       selectedTopics.push({
         title: topic.title,
@@ -287,6 +356,12 @@ function collectSelectedTopics() {
   })
   
   return selectedTopics
+}
+
+// 更新添加按钮状态
+function updateAddButtonState() {
+  const trimmed = customTopicInput.value.trim()
+  btnAddCustomTopic.disabled = !trimmed || extendedTopics.some(t => t.title === trimmed)
 }
 
 // 第二阶段：生成最终内容接口
@@ -443,6 +518,10 @@ async function handleGenerate() {
 function handleBack() {
   showView('form')
   hideStatus()
+  // 清空自定义主题输入框
+  if (customTopicInput) {
+    customTopicInput.value = ''
+  }
 }
 
 // 处理"确认并生成"按钮点击（第二阶段）
@@ -510,6 +589,23 @@ btnSaveOnly.addEventListener('click', handleSaveOnly)
 btnGenerate.addEventListener('click', handleGenerate)
 btnBack.addEventListener('click', handleBack)
 btnConfirmGenerate.addEventListener('click', handleConfirmGenerate)
+
+// 绑定自定义主题相关事件
+if (btnAddCustomTopic && customTopicInput) {
+  btnAddCustomTopic.addEventListener('click', handleAddCustomTopic)
+  
+  customTopicInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAddCustomTopic()
+    }
+  })
+  
+  customTopicInput.addEventListener('input', updateAddButtonState)
+  
+  // 初始化按钮状态
+  updateAddButtonState()
+}
 
 // 页面加载时初始化
 // 默认显示表单视图
