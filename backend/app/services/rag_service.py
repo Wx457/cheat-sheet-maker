@@ -1,5 +1,6 @@
 import asyncio
 import io
+import time
 from typing import List
 from pymongo import MongoClient
 from pypdf import PdfReader
@@ -47,8 +48,21 @@ class RAGService:
         Returns:
             摄入的文档块数量
         """
+        # ========== [性能监控 - 可删除] ==========
+        ingest_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        split_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 1. 使用 RecursiveCharacterTextSplitter 切分文本
         chunks = self.text_splitter.split_text(raw_text)
+        
+        # ========== [性能监控 - 可删除] ==========
+        split_elapsed = time.time() - split_start_time
+        print(f"⏱️ [性能监控] ingest_text - 文本切分耗时: {split_elapsed:.2f} 秒，生成 {len(chunks)} 个块")
+        # ========== [性能监控 - 可删除] ==========
         
         # 2. 转换为 Document 对象，添加 metadata
         documents = [
@@ -66,11 +80,25 @@ class RAGService:
             index_name="default"
         )
         
+        # ========== [性能监控 - 可删除] ==========
+        embed_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 4. 一次性添加所有文档
         await asyncio.to_thread(
             vector_store.add_documents,
             documents
         )
+        
+        # ========== [性能监控 - 可删除] ==========
+        embed_elapsed = time.time() - embed_start_time
+        print(f"⏱️ [性能监控] ingest_text - 向量化并存储耗时: {embed_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - ingest_start_time
+        print(f"⏱️ [性能监控] ingest_text - 总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
         
         return len(documents)
     
@@ -87,6 +115,14 @@ class RAGService:
         Returns:
             摄入的文档块数量
         """
+        # ========== [性能监控 - 可删除] ==========
+        pdf_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        extract_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 使用 PdfReader 读取 PDF
         pdf_reader = PdfReader(io.BytesIO(file_content))
         
@@ -97,8 +133,18 @@ class RAGService:
             if page_text:
                 raw_text += page_text + "\n"
         
+        # ========== [性能监控 - 可删除] ==========
+        extract_elapsed = time.time() - extract_start_time
+        print(f"⏱️ [性能监控] ingest_pdf - PDF 文本提取耗时: {extract_elapsed:.2f} 秒，提取 {len(raw_text)} 字符")
+        # ========== [性能监控 - 可删除] ==========
+        
         # 复用现有的 ingest_text 逻辑完成切片和存储
         chunks_count = await self.ingest_text(raw_text, source_name=filename)
+        
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - pdf_start_time
+        print(f"⏱️ [性能监控] ingest_pdf - 总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
         
         return chunks_count
     
@@ -121,6 +167,10 @@ class RAGService:
         Returns:
             List[dict]: 包含 content, source, score 的字典列表
         """
+        # ========== [性能监控 - 可删除] ==========
+        search_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 获取 vector_store 实例
         vector_store = self._get_vector_store()
         
@@ -130,6 +180,11 @@ class RAGService:
             query,
             k=k
         )
+        
+        # ========== [性能监控 - 可删除] ==========
+        search_elapsed = time.time() - search_start_time
+        print(f"⏱️ [性能监控] search_context - 向量搜索耗时: {search_elapsed:.2f} 秒，查询: {query[:50]}...，返回 {len(results)} 个结果")
+        # ========== [性能监控 - 可删除] ==========
         
         # 格式化返回结果
         return [

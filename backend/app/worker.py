@@ -4,6 +4,7 @@ ARQ Worker 进程
 """
 import traceback
 import base64
+import time
 from typing import Dict, Any
 from datetime import datetime
 
@@ -85,8 +86,17 @@ async def generate_outline_task(
     Returns:
         任务结果
     """
+    # ========== [性能监控 - 可删除] ==========
+    task_start_time = time.time()
+    print(f"⏱️ [性能监控] generate_outline_task 开始执行")
+    # ========== [性能监控 - 可删除] ==========
+    
     try:
         exam_type_enum = ExamType(exam_type)
+        
+        # ========== [性能监控 - 可删除] ==========
+        llm_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
         
         # 调用生成函数
         result = generate_outline(
@@ -95,12 +105,26 @@ async def generate_outline_task(
             exam_type=exam_type_enum
         )
         
+        # ========== [性能监控 - 可删除] ==========
+        llm_elapsed = time.time() - llm_start_time
+        print(f"⏱️ [性能监控] LLM 生成大纲耗时: {llm_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - task_start_time
+        print(f"⏱️ [性能监控] generate_outline_task 总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
         # 返回结果（ARQ 会自动存储）
         return {
             "success": True,
             "data": result.model_dump()
         }
     except Exception as e:
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - task_start_time
+        print(f"⏱️ [性能监控] generate_outline_task 失败，总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
         return {
             "success": False,
             "error": str(e),
@@ -130,6 +154,11 @@ async def generate_cheat_sheet_task(
     Returns:
         任务结果（包含 file_key 和 project_id）
     """
+    # ========== [性能监控 - 可删除] ==========
+    task_start_time = time.time()
+    print(f"⏱️ [性能监控] generate_cheat_sheet_task 开始执行")
+    # ========== [性能监控 - 可删除] ==========
+    
     try:
         # 提取元数据（如果存在）
         metadata = kwargs.pop("_metadata", None)
@@ -137,8 +166,21 @@ async def generate_cheat_sheet_task(
         # 构建请求参数
         generate_request = GenerateSheetRequest(**kwargs)
         
+        # ========== [性能监控 - 可删除] ==========
+        llm_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # Step 1: 调用 LLM 生成函数
         result = await generate_cheat_sheet(generate_request)
+        
+        # ========== [性能监控 - 可删除] ==========
+        llm_elapsed = time.time() - llm_start_time
+        print(f"⏱️ [性能监控] Step 1 - LLM 生成小抄内容耗时: {llm_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        db_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
         
         # Step 2: 如果包含元数据，保存到数据库
         project_id = None
@@ -167,14 +209,42 @@ async def generate_cheat_sheet_task(
             project_id = str(insert_result.inserted_id)
             client.close()
         
+        # ========== [性能监控 - 可删除] ==========
+        db_elapsed = time.time() - db_start_time
+        if metadata:
+            print(f"⏱️ [性能监控] Step 2 - 保存到数据库耗时: {db_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        clean_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # Step 3: 清洗数据（清洗 LLM 返回的公式格式）
         cheat_sheet_dict = result.model_dump()
         clean_equation_data(cheat_sheet_dict)
+        
+        # ========== [性能监控 - 可删除] ==========
+        clean_elapsed = time.time() - clean_start_time
+        print(f"⏱️ [性能监控] Step 3 - 清洗数据耗时: {clean_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        pdf_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
         
         # Step 4: 生成 PDF（使用 React 前端渲染）
         # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
         # PDF 服务会访问 React 静态页面并注入数据
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
+        
+        # ========== [性能监控 - 可删除] ==========
+        pdf_elapsed = time.time() - pdf_start_time
+        print(f"⏱️ [性能监控] Step 4 - 生成 PDF 耗时: {pdf_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        upload_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
         
         # Step 5: 上传到 MinIO
         storage_service = get_storage_service()
@@ -191,6 +261,11 @@ async def generate_cheat_sheet_task(
         if not file_key:
             raise ValueError("PDF 上传到 MinIO 失败")
         
+        # ========== [性能监控 - 可删除] ==========
+        upload_elapsed = time.time() - upload_start_time
+        print(f"⏱️ [性能监控] Step 5 - 上传到 MinIO 耗时: {upload_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
         # Step 6: 返回结果（包含 file_key 和 project_id）
         result_data = {
             "status": "completed",
@@ -203,8 +278,17 @@ async def generate_cheat_sheet_task(
         if project_id:
             result_data["project_id"] = project_id
         
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - task_start_time
+        print(f"⏱️ [性能监控] generate_cheat_sheet_task 总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
         return result_data
     except Exception as e:
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - task_start_time
+        print(f"⏱️ [性能监控] generate_cheat_sheet_task 失败，总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
         return {
             "status": "failed",
             "error": str(e),
@@ -226,6 +310,11 @@ async def generate_pdf_task(
     Returns:
         任务结果（包含 file_key）
     """
+    # ========== [性能监控 - 可删除] ==========
+    task_start_time = time.time()
+    print(f"⏱️ [性能监控] generate_pdf_task 开始执行")
+    # ========== [性能监控 - 可删除] ==========
+    
     try:
         if not cheat_sheet:
             raise ValueError("缺少 cheat_sheet 数据")
@@ -233,12 +322,34 @@ async def generate_pdf_task(
         # 验证数据格式（可选）
         cheat_sheet_obj = CheatSheetSchema(**cheat_sheet)
         
+        # ========== [性能监控 - 可删除] ==========
+        clean_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 清洗数据（清洗公式格式）
         clean_equation_data(cheat_sheet)
+        
+        # ========== [性能监控 - 可删除] ==========
+        clean_elapsed = time.time() - clean_start_time
+        print(f"⏱️ [性能监控] 清洗数据耗时: {clean_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        pdf_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
         
         # 生成 PDF（使用 React 前端渲染）
         # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet)
+        
+        # ========== [性能监控 - 可删除] ==========
+        pdf_elapsed = time.time() - pdf_start_time
+        print(f"⏱️ [性能监控] 生成 PDF 耗时: {pdf_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        upload_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
         
         # 上传到 MinIO
         storage_service = get_storage_service()
@@ -255,6 +366,16 @@ async def generate_pdf_task(
         if not file_key:
             raise ValueError("PDF 上传到 MinIO 失败")
         
+        # ========== [性能监控 - 可删除] ==========
+        upload_elapsed = time.time() - upload_start_time
+        print(f"⏱️ [性能监控] 上传到 MinIO 耗时: {upload_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - task_start_time
+        print(f"⏱️ [性能监控] generate_pdf_task 总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
         # 返回结果（包含 file_key）
         return {
             "status": "completed",
@@ -263,6 +384,10 @@ async def generate_pdf_task(
             "filename": filename
         }
     except Exception as e:
+        # ========== [性能监控 - 可删除] ==========
+        total_elapsed = time.time() - task_start_time
+        print(f"⏱️ [性能监控] generate_pdf_task 失败，总耗时: {total_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
         return {
             "status": "failed",
             "error": str(e),

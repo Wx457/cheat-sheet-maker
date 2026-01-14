@@ -3,6 +3,7 @@ MinIO/S3 存储服务
 使用 boto3 与 MinIO (S3 兼容) 交互
 """
 import boto3
+import time
 from botocore.exceptions import ClientError, BotoCoreError
 from typing import Optional
 from datetime import datetime
@@ -87,6 +88,10 @@ class StorageService:
         Returns:
             file_key: 文件的 key（用于后续访问），如果失败则返回 None
         """
+        # ========== [性能监控 - 可删除] ==========
+        upload_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         try:
             # 生成唯一的文件 key（包含时间戳和 UUID，避免冲突）
             timestamp = datetime.utcnow().strftime("%Y%m%d")
@@ -101,13 +106,26 @@ class StorageService:
                 ContentType='application/pdf'
             )
             
+            # ========== [性能监控 - 可删除] ==========
+            upload_elapsed = time.time() - upload_start_time
+            print(f"⏱️ [性能监控] upload_file - 上传耗时: {upload_elapsed:.2f} 秒，文件大小: {len(file_data)} bytes，file_key: {file_key}")
+            # ========== [性能监控 - 可删除] ==========
+            
             print(f"✅ 文件已上传: {file_key}")
             return file_key
             
         except ClientError as e:
+            # ========== [性能监控 - 可删除] ==========
+            upload_elapsed = time.time() - upload_start_time
+            print(f"⏱️ [性能监控] upload_file - 上传失败，耗时: {upload_elapsed:.2f} 秒")
+            # ========== [性能监控 - 可删除] ==========
             print(f"❌ 上传文件失败: {e}")
             return None
         except BotoCoreError as e:
+            # ========== [性能监控 - 可删除] ==========
+            upload_elapsed = time.time() - upload_start_time
+            print(f"⏱️ [性能监控] upload_file - 上传失败，耗时: {upload_elapsed:.2f} 秒")
+            # ========== [性能监控 - 可删除] ==========
             print(f"❌ Boto3 错误: {e}")
             return None
     
@@ -122,6 +140,10 @@ class StorageService:
         Returns:
             预签名 URL，如果失败则返回 None
         """
+        # ========== [性能监控 - 可删除] ==========
+        url_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         try:
             url = self.s3_client.generate_presigned_url(
                 'get_object',
@@ -131,11 +153,25 @@ class StorageService:
                 },
                 ExpiresIn=expiration
             )
+            
+            # ========== [性能监控 - 可删除] ==========
+            url_elapsed = time.time() - url_start_time
+            print(f"⏱️ [性能监控] get_presigned_url - 生成预签名 URL 耗时: {url_elapsed:.2f} 秒")
+            # ========== [性能监控 - 可删除] ==========
+            
             return url
         except ClientError as e:
+            # ========== [性能监控 - 可删除] ==========
+            url_elapsed = time.time() - url_start_time
+            print(f"⏱️ [性能监控] get_presigned_url - 生成失败，耗时: {url_elapsed:.2f} 秒")
+            # ========== [性能监控 - 可删除] ==========
             print(f"❌ 生成预签名 URL 失败: {e}")
             return None
         except BotoCoreError as e:
+            # ========== [性能监控 - 可删除] ==========
+            url_elapsed = time.time() - url_start_time
+            print(f"⏱️ [性能监控] get_presigned_url - 生成失败，耗时: {url_elapsed:.2f} 秒")
+            # ========== [性能监控 - 可删除] ==========
             print(f"❌ Boto3 错误: {e}")
             return None
 

@@ -178,6 +178,10 @@ def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamTy
 
     response = None
     try:
+        # ========== [性能监控 - 可删除] ==========
+        api_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 使用重试机制调用 API
         # 注意：Google Generative AI 的超时需要通过环境变量或客户端配置设置
         # 这里我们依赖重试机制来处理超时
@@ -194,13 +198,27 @@ def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamTy
         response = _exponential_backoff_retry(_call_api)
         raw_json = response.text
         
+        # ========== [性能监控 - 可删除] ==========
+        api_elapsed = time.time() - api_start_time
+        print(f"⏱️ [性能监控] generate_outline - Gemini API 调用耗时: {api_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
         print("----- [DEBUG] Outline Response Received -----")
         print(f"Preview: {raw_json[:100]}...")
 
+        # ========== [性能监控 - 可删除] ==========
+        parse_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 修复 JSON 字符串
         repaired_json = repair_json_string(raw_json)
         
         data = json.loads(repaired_json)
+        
+        # ========== [性能监控 - 可删除] ==========
+        parse_elapsed = time.time() - parse_start_time
+        print(f"⏱️ [性能监控] generate_outline - JSON 解析耗时: {parse_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
         
         
         # 确保 topics 数量在合理范围内（虽然 Prompt 限制了，但为了保险可以做个截断，或者就这样留着）
@@ -320,6 +338,10 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
     
     total_items = sum(budget_map.values())
     
+    # ========== [性能监控 - 可删除] ==========
+    rag_start_time = time.time()
+    # ========== [性能监控 - 可删除] ==========
+    
     # RAG 上下文注入逻辑：必须从向量数据库检索
     rag_service = get_rag_service()
     rag_context_str = ""
@@ -348,6 +370,11 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
                 rag_context_str += f"Source: {result['source']}\n"
                 rag_context_str += f"Content: {result['content']}\n"
                 rag_context_str += "---------------------------------------\n"
+    
+    # ========== [性能监控 - 可删除] ==========
+    rag_elapsed = time.time() - rag_start_time
+    print(f"⏱️ [性能监控] generate_cheat_sheet - RAG 上下文检索耗时: {rag_elapsed:.2f} 秒")
+    # ========== [性能监控 - 可删除] ==========
     
     # 获取考试类型上下文
     exam_type_context = {
@@ -489,6 +516,10 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
 
     response = None
     try:
+        # ========== [性能监控 - 可删除] ==========
+        api_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 使用重试机制调用 API
         # 注意：Google Generative AI 的超时需要通过环境变量或客户端配置设置
         # 这里我们依赖重试机制来处理超时
@@ -505,13 +536,27 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
         response = _exponential_backoff_retry(_call_api)
         raw_json = response.text
         
+        # ========== [性能监控 - 可删除] ==========
+        api_elapsed = time.time() - api_start_time
+        print(f"⏱️ [性能监控] generate_cheat_sheet - Gemini API 调用耗时: {api_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
+        
         print("----- [DEBUG] Cheat Sheet Response Received -----")
         print(f"Preview: {raw_json[:100]}...")
 
+        # ========== [性能监控 - 可删除] ==========
+        parse_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
         # 修复 JSON 字符串
         repaired_json = repair_json_string(raw_json)
         
         data = json.loads(repaired_json)
+        
+        # ========== [性能监控 - 可删除] ==========
+        parse_elapsed = time.time() - parse_start_time
+        print(f"⏱️ [性能监控] generate_cheat_sheet - JSON 解析耗时: {parse_elapsed:.2f} 秒")
+        # ========== [性能监控 - 可删除] ==========
 
         # 类型清洗逻辑 (Type Sanitizer)
         # 目的：将 LLM 自创的 type (如 "exam_question", "concept") 
