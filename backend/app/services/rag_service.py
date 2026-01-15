@@ -50,11 +50,7 @@ class RAGService:
         """
         # ========== [性能监控 - 可删除] ==========
         ingest_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
-        
-        # ========== [性能监控 - 可删除] ==========
         split_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
         
         # 1. 使用 RecursiveCharacterTextSplitter 切分文本
         chunks = self.text_splitter.split_text(raw_text)
@@ -62,7 +58,6 @@ class RAGService:
         # ========== [性能监控 - 可删除] ==========
         split_elapsed = time.time() - split_start_time
         print(f"⏱️ [性能监控] ingest_text - 文本切分耗时: {split_elapsed:.2f} 秒，生成 {len(chunks)} 个块")
-        # ========== [性能监控 - 可删除] ==========
         
         # 2. 转换为 Document 对象，添加 metadata
         documents = [
@@ -82,7 +77,6 @@ class RAGService:
         
         # ========== [性能监控 - 可删除] ==========
         embed_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
         
         # 4. 一次性添加所有文档
         await asyncio.to_thread(
@@ -93,12 +87,9 @@ class RAGService:
         # ========== [性能监控 - 可删除] ==========
         embed_elapsed = time.time() - embed_start_time
         print(f"⏱️ [性能监控] ingest_text - 向量化并存储耗时: {embed_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
-        
-        # ========== [性能监控 - 可删除] ==========
+
         total_elapsed = time.time() - ingest_start_time
         print(f"⏱️ [性能监控] ingest_text - 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         
         return len(documents)
     
@@ -117,11 +108,7 @@ class RAGService:
         """
         # ========== [性能监控 - 可删除] ==========
         pdf_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
-        
-        # ========== [性能监控 - 可删除] ==========
         extract_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
         
         # 使用 PdfReader 读取 PDF
         pdf_reader = PdfReader(io.BytesIO(file_content))
@@ -136,7 +123,7 @@ class RAGService:
         # ========== [性能监控 - 可删除] ==========
         extract_elapsed = time.time() - extract_start_time
         print(f"⏱️ [性能监控] ingest_pdf - PDF 文本提取耗时: {extract_elapsed:.2f} 秒，提取 {len(raw_text)} 字符")
-        # ========== [性能监控 - 可删除] ==========
+
         
         # 复用现有的 ingest_text 逻辑完成切片和存储
         chunks_count = await self.ingest_text(raw_text, source_name=filename)
@@ -144,7 +131,6 @@ class RAGService:
         # ========== [性能监控 - 可删除] ==========
         total_elapsed = time.time() - pdf_start_time
         print(f"⏱️ [性能监控] ingest_pdf - 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         
         return chunks_count
     
@@ -156,6 +142,55 @@ class RAGService:
             index_name="default"
         )
     
+    async def search_context_mmr(self, query: str, k: int = 3, fetch_k: int = 10) -> List[dict]:
+        """
+        [性能优化] 使用 MMR (最大边界相关) 算法进行检索。
+        
+        MMR 算法在保证相关性的同时，最大化结果的多样性，减少冗余内容。
+        
+        Args:
+            query: 查询文本
+            k: 最终返回的文档数量 (建议设小，如 3)
+            fetch_k: 初始获取的候选文档数量 (建议设大，如 10)
+            
+        Returns:
+            List[dict]: 包含 content, source, score 的字典列表
+            - content: 文档内容
+            - source: 数据源名称
+            - score: 固定为 0.0（MMR 不提供相似度分数，保持向后兼容）
+        """
+        # ========== [性能监控 - 可删除] ==========
+        search_start_time = time.time()
+        # ========== [性能监控 - 可删除] ==========
+        
+        vector_store = self._get_vector_store()
+        
+        # 使用 max_marginal_relevance_search
+        # 注意: MongoDBAtlasVectorSearch 的实现通常支持这个，如果底层不支持会自动回退或报错
+        # lambda_mult=0.5 表示相关性和多样性各占 50%
+        results = await asyncio.to_thread(
+            vector_store.max_marginal_relevance_search,
+            query,
+            k=k,
+            fetch_k=fetch_k,
+            lambda_mult=0.5 
+        )
+        
+        # ========== [性能监控 - 可删除] ==========
+        search_elapsed = time.time() - search_start_time
+        print(f"⏱️ [性能监控] search_context_mmr - MMR 搜索耗时: {search_elapsed:.2f} 秒，查询: {query[:50]}...，返回 {len(results)} 个结果")
+        # ========== [性能监控 - 可删除] ==========
+        
+        # 格式化结果 (MMR 通常只返回 doc，不返回 score，这里做适配以保持向后兼容)
+        return [
+            {
+                "content": doc.page_content,
+                "source": doc.metadata.get("source", "unknown"),
+                "score": 0.0  # MMR 模式下 score 固定为 0.0，保持向后兼容
+            }
+            for doc in results
+        ]
+
     async def search_context(self, query: str, k: int = 5) -> List[dict]:
         """
         根据 query 在向量库中搜索最相关的 k 个片段。
@@ -169,7 +204,6 @@ class RAGService:
         """
         # ========== [性能监控 - 可删除] ==========
         search_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
         
         # 获取 vector_store 实例
         vector_store = self._get_vector_store()
@@ -184,7 +218,6 @@ class RAGService:
         # ========== [性能监控 - 可删除] ==========
         search_elapsed = time.time() - search_start_time
         print(f"⏱️ [性能监控] search_context - 向量搜索耗时: {search_elapsed:.2f} 秒，查询: {query[:50]}...，返回 {len(results)} 个结果")
-        # ========== [性能监控 - 可删除] ==========
         
         # 格式化返回结果
         return [

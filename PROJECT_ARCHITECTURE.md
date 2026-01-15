@@ -192,6 +192,8 @@ cheat-sheet-maker/
 ```
 
 ### 搜索流程
+
+#### 相似度搜索（用于 Outline 生成等场景）
 ```
 用户查询
     │
@@ -202,8 +204,31 @@ cheat-sheet-maker/
 [向量相似度搜索] (MongoDB Atlas Vector Search)
     │
     ▼
-[返回相关文档片段]
+[返回相关文档片段] (包含相似度分数)
 ```
+
+#### MMR 检索（用于 Cheat Sheet 生成）
+```
+用户查询
+    │
+    ▼
+[生成查询向量] (OpenAI Embedding API)
+    │
+    ▼
+[MMR 检索] (最大边界相关算法)
+    │    ├──→ 获取 fetch_k 个候选文档
+    │    └──→ 选择 k 个最相关且多样化的文档
+    │
+    ▼
+[内容去重] (使用 hash 指纹)
+    │
+    ▼
+[返回去重后的文档片段]
+```
+
+**注意**: 
+- 当有多个主题时，系统使用 `asyncio.gather` 并行执行所有主题的搜索，显著提升性能
+- Cheat Sheet 生成使用 MMR 检索 + 去重，减少冗余内容，降低上下文长度
 
 ### 生成 Cheat Sheet 流程（异步任务模式）
 ```
@@ -215,7 +240,10 @@ cheat-sheet-maker/
     ▼
 [Worker 进程消费任务]
     │
-    ├──→ [RAG 上下文检索] (MongoDB Atlas Vector Search)
+    ├──→ [RAG 上下文检索] (并行 MMR 检索 + 去重)
+    │    ├──→ 并行执行所有主题的 MMR 检索 (asyncio.gather)
+    │    ├──→ MongoDB Atlas Vector Search (MMR 算法)
+    │    └──→ 内容去重 (hash 指纹)
     │
     ▼
 [LLM 生成内容] (Gemini API)
@@ -224,7 +252,7 @@ cheat-sheet-maker/
 [保存到数据库] (MongoDB projects 集合，如果包含 metadata)
     │
     ▼
-[生成 HTML] (html_generator.py)
+[清洗数据] (清洗公式格式)
     │
     ▼
 [生成 PDF] (pdf_service.py + Playwright)
@@ -254,9 +282,13 @@ cheat-sheet-maker/
 - **Embedding**: OpenAI `text-embedding-3-small` (1536维)
 - **LLM**: Google Gemini 2.5 Flash
 - **向量存储**: MongoDB Atlas Vector Search
+- **检索算法**: 
+  - 相似度搜索 (Similarity Search) - 用于 Outline 生成
+  - MMR (Maximal Marginal Relevance) - 用于 Cheat Sheet 生成，减少冗余
 - **PDF 处理**: Playwright (Headless Chrome) + PyPDF
 - **文本处理**: LangChain
 - **S3 客户端**: boto3
+- **异步并发**: asyncio (用于并行 RAG 检索)
 
 ### 前端
 - **框架**: React 18.3
@@ -287,14 +319,27 @@ cheat-sheet-maker/
 - **主要方法**:
   - `ingest_text()` - 文本摄入
   - `ingest_pdf()` - PDF 摄入
-  - `search_context()` - 向量搜索
+  - `search_context()` - 向量搜索（相似度搜索，返回 score）
+  - `search_context_mmr()` - MMR 检索（最大边界相关算法，减少冗余）
   - `clear_vector_data()` - 清理旧数据
+- **检索策略**:
+  - **相似度搜索** (`search_context`): 返回最相关的 k 个结果，包含相似度分数
+  - **MMR 检索** (`search_context_mmr`): 在保证相关性的同时最大化多样性，减少冗余内容
+    - 参数: `k=3`（最终结果数），`fetch_k=10`（初始候选集）
+    - 返回格式: 与 `search_context` 兼容（`score` 固定为 0.0 以保持向后兼容）
 
 ### 3. LLM Service (`llm.py`)
 - **功能**: Gemini LLM 服务
 - **主要函数**:
   - `generate_outline()` - 生成大纲
   - `generate_cheat_sheet()` - 生成 Cheat Sheet
+- **性能优化**:
+  - **并行 MMR 检索**: 使用 `asyncio.gather` 并行执行多个主题的 MMR 检索，而非顺序串行
+    - 每个主题使用 `search_context_mmr(k=3, fetch_k=10)` 进行检索
+    - 性能提升: N 个主题时，检索耗时从 N × T 降低到 ≈ T（T 为单个搜索耗时）
+  - **内容去重**: 使用内容 hash 值作为指纹，避免重复内容传入 LLM
+    - 实现: 使用 `set` 存储已见过的内容 hash，跳过重复内容
+    - 效果: 减少上下文长度，降低 LLM token 消耗
 
 ### 4. HTML Generator (`html_generator.py`)
 - **功能**: 将 Cheat Sheet 数据转换为 HTML
@@ -431,10 +476,56 @@ cheat-sheet-maker/
 3. 客户端轮询 `/api/task/{task_id}` 查询状态
 4. 任务完成后，获得结果和预签名下载链接
 
+### 并行处理优化
+- **并行 MMR 检索**: 多个主题的向量搜索使用 `asyncio.gather` 并行执行
+- **MMR 算法**: 使用最大边界相关算法，在保证相关性的同时最大化多样性，减少冗余内容
+- **内容去重**: 使用内容 hash 指纹避免重复内容传入 LLM
+- **性能提升**: 
+  - 并行执行：显著减少多主题场景下的检索耗时
+  - MMR 优化：减少上下文长度，降低 LLM token 消耗
+  - 去重逻辑：进一步减少冗余，提升生成质量
+- **实现位置**: `backend/app/services/llm.py` - `generate_cheat_sheet()` 函数
+
 ### 文件存储
 - PDF 文件存储在 MinIO 对象存储中
 - 使用预签名 URL 提供临时访问（1小时有效）
 - 文件按日期组织：`YYYYMMDD/{uuid}_{filename}.pdf`
+
+## ⚡ 性能优化与监控
+
+### 性能优化策略
+
+#### 1. 并行 MMR 检索 + 去重
+- **位置**: `backend/app/services/llm.py` - `generate_cheat_sheet()` 函数
+- **优化前**: 顺序串行检索（Sequential Serial Retrieval）
+  - 每个主题依次等待前一个完成
+  - 总耗时 = N × T（N 个主题，每个耗时 T）
+  - 使用相似度搜索，可能返回重复内容
+- **优化后**: 并行 MMR 检索 + 去重
+  - **并行执行**: 所有主题同时检索（使用 `asyncio.gather`）
+  - **MMR 算法**: 使用 `search_context_mmr(k=3, fetch_k=10)` 减少冗余
+  - **内容去重**: 使用内容 hash 指纹避免重复内容
+  - 总耗时 ≈ T（最慢的单个搜索耗时）
+- **性能提升**: 
+  - **速度**: 理论上可提升 N 倍（N 为主题数量）
+  - **质量**: MMR 减少冗余，去重进一步优化
+  - **成本**: 减少上下文长度，降低 LLM token 消耗
+- **示例**: 5 个主题，每个搜索 0.5 秒
+  - 优化前: 5 × 0.5 = 2.5 秒，可能包含重复内容
+  - 优化后: ≈ 0.5 秒（提升约 5 倍），内容更精简、多样化
+
+#### 2. 性能监控系统
+- **功能**: 全流程性能监控，记录各步骤耗时
+- **实现**: 使用醒目标记 `[性能监控 - 可删除]` 包裹所有监控代码
+- **监控范围**:
+  - **Worker 任务**: `generate_outline_task`, `generate_cheat_sheet_task`, `generate_pdf_task`
+  - **LLM 服务**: API 调用、JSON 解析、并行 MMR 检索耗时
+  - **RAG 服务**: 文本切分、向量化、相似度搜索、MMR 搜索耗时
+  - **PDF 服务**: 浏览器启动、页面导航、渲染、PDF 生成耗时
+  - **存储服务**: 文件上传、预签名 URL 生成耗时
+  - **API 端点**: 各 API 的总耗时和步骤耗时
+- **输出格式**: `⏱️ [性能监控] <步骤名称> 耗时: X.XX 秒`
+- **维护**: 所有监控代码使用统一标记，便于后续批量删除
 
 ---
 

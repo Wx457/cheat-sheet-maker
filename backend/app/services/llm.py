@@ -348,18 +348,19 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
     rag_context_str = ""
     
     if request.selected_topics:
-        # ========== [性能优化] 并行检索：使用 asyncio.gather 同时检索所有主题，而非顺序串行 ==========
-        # 如果有选定主题，对每个主题进行 RAG 检索（并行执行以提高性能）
+        # ========== [性能优化] 并行 MMR 检索：使用 asyncio.gather 同时检索所有主题，并使用 MMR 减少冗余 ==========
+        # 如果有选定主题，对每个主题进行 RAG 检索（并行执行以提高性能，使用 MMR 减少冗余）
         topic_count = len(request.selected_topics)
         
         # ========== [性能监控 - 可删除] ==========
         parallel_search_start = time.time()
-        print(f"⏱️ [性能监控] 开始并行检索 {topic_count} 个主题...")
+        print(f"⏱️ [性能监控] 开始并行 MMR 检索 {topic_count} 个主题...")
         # ========== [性能监控 - 可删除] ==========
         
-        # 创建所有主题的搜索任务
+        # 创建所有主题的 MMR 搜索任务（并行执行）
+        # 使用 MMR: k=3 返回最终结果，fetch_k=10 初始候选集
         search_tasks = [
-            rag_service.search_context(topic.title, k=5)
+            rag_service.search_context_mmr(topic.title, k=3, fetch_k=10)
             for topic in request.selected_topics
         ]
         
@@ -368,8 +369,11 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
         
         # ========== [性能监控 - 可删除] ==========
         parallel_search_elapsed = time.time() - parallel_search_start
-        print(f"⏱️ [性能监控] 并行检索 {topic_count} 个主题完成，耗时: {parallel_search_elapsed:.2f} 秒（平均每个主题: {parallel_search_elapsed/topic_count:.2f} 秒）")
+        print(f"⏱️ [性能监控] 并行 MMR 检索 {topic_count} 个主题完成，耗时: {parallel_search_elapsed:.2f} 秒（平均每个主题: {parallel_search_elapsed/topic_count:.2f} 秒）")
         # ========== [性能监控 - 可删除] ==========
+        
+        # ========== [性能优化] 去重逻辑：使用内容指纹（hash）避免重复内容 ==========
+        seen_content_hashes = set()  # 存储已见过的内容指纹
         
         # 按顺序处理结果（保持输出格式一致）
         for topic, results in zip(request.selected_topics, all_results):
@@ -377,10 +381,21 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
                 # 拼接该主题的 RAG 上下文
                 rag_context_str += f"\n--- Context for topic '{topic.title}' ---\n"
                 for result in results:
+                    # 生成内容指纹（使用内容的 hash 值）
+                    content_hash = hash(result['content'].strip())
+                    
+                    # 如果内容已存在，跳过（去重）
+                    if content_hash in seen_content_hashes:
+                        continue
+                    
+                    # 记录已见过的内容
+                    seen_content_hashes.add(content_hash)
+                    
+                    # 拼接该主题的 RAG 上下文
                     rag_context_str += f"Source: {result['source']}\n"
                     rag_context_str += f"Content: {result['content']}\n"
                     rag_context_str += "---------------------------------------\n"
-        # ========== [性能优化] 并行检索结束 ==========
+        # ========== [性能优化] 并行 MMR 检索 + 去重结束 ==========
     else:
         # 如果没有选定主题，使用通用查询获取知识库内容
         # 使用用户背景或课程类型作为查询词
