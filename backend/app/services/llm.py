@@ -308,11 +308,15 @@ def _calculate_budget(page_limit: str, topics: List[TopicInput]) -> Dict[str, in
     return budget_map
 
 
-async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchema:
+async def generate_cheat_sheet(request: GenerateSheetRequest, user_id: str) -> CheatSheetSchema:
     """
     根据用户请求生成高密度的 Cheat Sheet。
     实现混合检索、领域自适应和预算控制算法。
-    现在支持 RAG 上下文注入。
+    现在支持 RAG 上下文注入和基于 user_id 的数据隔离。
+    
+    Args:
+        request: 生成请求参数
+        user_id: 用户 ID（必需，用于数据隔离过滤）
     """
     model = _get_gemini_model()
     
@@ -359,8 +363,9 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
         
         # 创建所有主题的 MMR 搜索任务（并行执行）
         # 使用 MMR: k=3 返回最终结果，fetch_k=10 初始候选集
+        # 传递 user_id 用于数据隔离过滤（必需参数）
         search_tasks = [
-            rag_service.search_context_mmr(topic.title, k=3, fetch_k=10)
+            rag_service.search_context_mmr(topic.title, user_id=user_id, k=3, fetch_k=10)
             for topic in request.selected_topics
         ]
         
@@ -398,9 +403,9 @@ async def generate_cheat_sheet(request: GenerateSheetRequest) -> CheatSheetSchem
         # ========== [性能优化] 并行 MMR 检索 + 去重结束 ==========
     else:
         # 如果没有选定主题，使用通用查询获取知识库内容
-        # 使用用户背景或课程类型作为查询词
+        # 使用用户背景或课程类型作为查询词（传递 user_id 用于数据隔离）
         query = request.user_context or archetype or "general knowledge"
-        results = await rag_service.search_context(query, k=10)
+        results = await rag_service.search_context(query, user_id=user_id, k=10)
         
         if results:
             rag_context_str += "\n--- General Knowledge Base Context ---\n"

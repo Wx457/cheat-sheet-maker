@@ -1,6 +1,6 @@
 import traceback
 from pydantic import BaseModel
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request, Header
 
 from app.schemas import (
     GenerateOutlineRequest,
@@ -20,7 +20,8 @@ class TaskResponse(BaseModel):
 @router.post("/api/outline", response_model=TaskResponse)
 async def generate_outline(
     request: Request,
-    payload: GenerateOutlineRequest = Body(...)
+    payload: GenerateOutlineRequest = Body(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
 ) -> TaskResponse:
     """
     生成复习大纲，分析对话记录并提取核心考试主题。
@@ -34,12 +35,13 @@ async def generate_outline(
         # 从应用状态获取 ARQ 连接池
         arq_pool = request.app.state.arq_pool
         
-        # 提交任务到 ARQ 队列
+        # 提交任务到 ARQ 队列（传递 user_id 用于数据隔离）
         job = await arq_pool.enqueue_job(
             'generate_outline_task',
             raw_text=payload.raw_text,
             user_context=payload.user_context,
-            exam_type=payload.exam_type.value if payload.exam_type else "final"
+            exam_type=payload.exam_type.value if payload.exam_type else "final",
+            user_id=x_user_id
         )
         
         return TaskResponse(
@@ -58,7 +60,8 @@ async def generate_outline(
 @router.post("/api/generate", response_model=TaskResponse)
 async def generate_cheat_sheet(
     request: Request,
-    payload: GenerateSheetRequest = Body(...)
+    payload: GenerateSheetRequest = Body(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
 ) -> TaskResponse:
     """
     生成备忘清单，使用 Google Gemini API 处理用户输入的文本。
@@ -89,6 +92,9 @@ async def generate_cheat_sheet(
             task_kwargs["selected_topics"] = [
                 topic.model_dump() for topic in payload.selected_topics
             ]
+        
+        # 添加 user_id（必需，用于数据隔离）
+        task_kwargs["user_id"] = x_user_id
         
         # 提交任务到 ARQ 队列
         job = await arq_pool.enqueue_job(

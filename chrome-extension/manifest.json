@@ -5,7 +5,8 @@
   "description": "将网页内容保存到 RAG 知识库",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "action": {
     "default_popup": "popup.html",

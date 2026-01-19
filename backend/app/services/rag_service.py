@@ -35,7 +35,7 @@ class RAGService:
             chunk_overlap=200
         )
     
-    async def ingest_text(self, raw_text: str, source_name: str) -> int:
+    async def ingest_text(self, raw_text: str, source_name: str, user_id: str) -> int:
         """
         将原始文本摄入到 MongoDB Atlas Vector Search
         
@@ -44,6 +44,7 @@ class RAGService:
         Args:
             raw_text: 原始文本内容
             source_name: 数据源名称（用于 metadata）
+            user_id: 用户 ID（必需，用于数据隔离）
             
         Returns:
             摄入的文档块数量
@@ -59,11 +60,17 @@ class RAGService:
         split_elapsed = time.time() - split_start_time
         print(f"⏱️ [性能监控] ingest_text - 文本切分耗时: {split_elapsed:.2f} 秒，生成 {len(chunks)} 个块")
         
-        # 2. 转换为 Document 对象，添加 metadata
+        # 2. 转换为 Document 对象，添加 metadata（包含 user_id 用于数据隔离）
+        # user_id 是必需的，必须添加到 metadata 中
+        metadata = {
+            "source": source_name,
+            "user_id": user_id
+        }
+        
         documents = [
             Document(
                 page_content=chunk,
-                metadata={"source": source_name}
+                metadata=metadata
             )
             for chunk in chunks
         ]
@@ -93,7 +100,7 @@ class RAGService:
         
         return len(documents)
     
-    async def ingest_pdf(self, file_content: bytes, filename: str) -> int:
+    async def ingest_pdf(self, file_content: bytes, filename: str, user_id: str) -> int:
         """
         将 PDF 文件摄入到 MongoDB Atlas Vector Search
         
@@ -102,6 +109,7 @@ class RAGService:
         Args:
             file_content: PDF 文件的二进制内容
             filename: 文件名（用作数据源名称）
+            user_id: 用户 ID（必需，用于数据隔离）
             
         Returns:
             摄入的文档块数量
@@ -125,8 +133,8 @@ class RAGService:
         print(f"⏱️ [性能监控] ingest_pdf - PDF 文本提取耗时: {extract_elapsed:.2f} 秒，提取 {len(raw_text)} 字符")
 
         
-        # 复用现有的 ingest_text 逻辑完成切片和存储
-        chunks_count = await self.ingest_text(raw_text, source_name=filename)
+        # 复用现有的 ingest_text 逻辑完成切片和存储（传递 user_id）
+        chunks_count = await self.ingest_text(raw_text, source_name=filename, user_id=user_id)
         
         # ========== [性能监控 - 可删除] ==========
         total_elapsed = time.time() - pdf_start_time
@@ -142,14 +150,16 @@ class RAGService:
             index_name="default"
         )
     
-    async def search_context_mmr(self, query: str, k: int = 3, fetch_k: int = 10) -> List[dict]:
+    async def search_context_mmr(self, query: str, user_id: str, k: int = 3, fetch_k: int = 10) -> List[dict]:
         """
         [性能优化] 使用 MMR (最大边界相关) 算法进行检索。
         
         MMR 算法在保证相关性的同时，最大化结果的多样性，减少冗余内容。
+        强制基于 user_id 的数据隔离过滤。
         
         Args:
             query: 查询文本
+            user_id: 用户 ID（必需，用于数据隔离过滤）
             k: 最终返回的文档数量 (建议设小，如 3)
             fetch_k: 初始获取的候选文档数量 (建议设大，如 10)
             
@@ -165,15 +175,25 @@ class RAGService:
         
         vector_store = self._get_vector_store()
         
+        # 构建过滤条件（user_id 是必需的，必须进行过滤）
+        # MongoDB Atlas Vector Search 使用 $eq 操作符进行精确匹配
+        pre_filter = {"user_id": {"$eq": user_id}}
+        
         # 使用 max_marginal_relevance_search
         # 注意: MongoDBAtlasVectorSearch 的实现通常支持这个，如果底层不支持会自动回退或报错
         # lambda_mult=0.5 表示相关性和多样性各占 50%
+        # pre_filter: 用于基于 metadata 的过滤（MongoDB Atlas Vector Search 支持）
+        search_kwargs = {
+            "k": k,
+            "fetch_k": fetch_k,
+            "lambda_mult": 0.5,
+            "pre_filter": pre_filter  # 强制添加过滤条件
+        }
+        
         results = await asyncio.to_thread(
             vector_store.max_marginal_relevance_search,
             query,
-            k=k,
-            fetch_k=fetch_k,
-            lambda_mult=0.5 
+            **search_kwargs
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -191,12 +211,15 @@ class RAGService:
             for doc in results
         ]
 
-    async def search_context(self, query: str, k: int = 5) -> List[dict]:
+    async def search_context(self, query: str, user_id: str, k: int = 5) -> List[dict]:
         """
         根据 query 在向量库中搜索最相关的 k 个片段。
         
+        强制基于 user_id 的数据隔离过滤。
+        
         Args:
             query: 查询文本
+            user_id: 用户 ID（必需，用于数据隔离过滤）
             k: 返回最相关的 k 个结果（默认 5）
             
         Returns:
@@ -208,11 +231,18 @@ class RAGService:
         # 获取 vector_store 实例
         vector_store = self._get_vector_store()
         
-        # 使用 similarity_search_with_score 进行相似度搜索
+        # 构建过滤条件（user_id 是必需的，必须进行过滤）
+        # MongoDB Atlas Vector Search 使用 $eq 操作符进行精确匹配
+        pre_filter = {"user_id": {"$eq": user_id}}
+        
+        # 使用 similarity_search_with_score 进行相似度搜索（带过滤条件）
+        # 注意：similarity_search_with_score 可能支持 pre_filter 参数
+        # 如果不支持，可能需要使用其他方法或直接调用 MongoDB API
         results = await asyncio.to_thread(
             vector_store.similarity_search_with_score,
             query,
-            k=k
+            k=k,
+            pre_filter=pre_filter
         )
         
         # ========== [性能监控 - 可删除] ==========

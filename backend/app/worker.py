@@ -72,16 +72,20 @@ async def generate_outline_task(
     ctx,
     raw_text: str,
     user_context: str = None,
-    exam_type: str = "final"
+    exam_type: str = "final",
+    user_id: str = None  # 接受 user_id 参数以保持 API 一致性（虽然此任务不涉及 RAG，但 API 会传递）
 ) -> Dict[str, Any]:
     """
     ARQ 任务：生成大纲
+    
+    注意：此任务不涉及 RAG 检索，但接受 user_id 参数以保持 API 一致性。
     
     Args:
         ctx: ARQ 上下文
         raw_text: 原始文本
         user_context: 用户背景信息
         exam_type: 考试类型
+        user_id: 用户 ID（可选，用于保持 API 一致性，此任务不使用）
         
     Returns:
         任务结果
@@ -158,14 +162,20 @@ async def generate_cheat_sheet_task(
         # 提取元数据（如果存在）
         metadata = kwargs.pop("_metadata", None)
         
+        # 提取 user_id（必需，用于数据隔离）
+        # 如果没有提供 user_id，抛出错误（不允许 None）
+        user_id = kwargs.pop("user_id", None)
+        if not user_id:
+            raise ValueError("user_id 是必需的，但未在任务参数中提供。请确保 API 请求包含 X-User-ID header。")
+        
         # 构建请求参数
         generate_request = GenerateSheetRequest(**kwargs)
         
         # ========== [性能监控 - 可删除] ==========
         llm_start_time = time.time()
         
-        # Step 1: 调用 LLM 生成函数
-        result = await generate_cheat_sheet(generate_request)
+        # Step 1: 调用 LLM 生成函数（传递 user_id 用于数据隔离，必需参数）
+        result = await generate_cheat_sheet(generate_request, user_id=user_id)
         
         # ========== [性能监控 - 可删除] ==========
         llm_elapsed = time.time() - llm_start_time

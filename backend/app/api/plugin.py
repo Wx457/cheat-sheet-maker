@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 from bson import ObjectId
 from pymongo import MongoClient
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request, Header
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
@@ -76,7 +76,8 @@ class TaskResponse(BaseModel):
 @router.post("/api/plugin/analyze", response_model=TaskResponse)
 async def plugin_analyze(
     request: Request,
-    payload: PluginAnalyzeRequest = Body(...)
+    payload: PluginAnalyzeRequest = Body(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
 ) -> TaskResponse:
     """
     Chrome 插件：抓取 + 分析接口
@@ -98,11 +99,12 @@ async def plugin_analyze(
         ingest_start_time = time.time()
         # ========== [性能监控 - 可删除] ==========
         
-        # Step 1: 保存内容到向量库
+        # Step 1: 保存内容到向量库（传递 user_id 用于数据隔离）
         source_name = payload.course_name or payload.url
         chunks_count = await rag_service.ingest_text(
             raw_text=payload.content,
-            source_name=source_name
+            source_name=source_name,
+            user_id=x_user_id
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -120,9 +122,9 @@ async def plugin_analyze(
         # 注意：刚保存的内容已经进入向量库，可以立即检索到
         rag_context_str = ""
         if payload.syllabus:
-            # 如果提供了 syllabus，使用 syllabus 作为查询词进行精准检索
+            # 如果提供了 syllabus，使用 syllabus 作为查询词进行精准检索（传递 user_id 用于数据隔离）
             query = clean_raw_text(payload.syllabus)
-            results = await rag_service.search_context(query, k=10)
+            results = await rag_service.search_context(query, user_id=x_user_id, k=10)
             
             if results:
                 rag_context_str = "\n--- RAG Context from Knowledge Base (filtered by syllabus) ---\n"
@@ -132,9 +134,9 @@ async def plugin_analyze(
                     rag_context_str += "---------------------------------------\n"
         else:
             # 如果没有 syllabus，使用课程名称或内容摘要作为查询词
-            # 优先使用课程名称，如果没有则使用内容摘要
+            # 优先使用课程名称，如果没有则使用内容摘要（传递 user_id 用于数据隔离）
             query = payload.course_name or payload.content[:300] if len(payload.content) > 300 else payload.content
-            results = await rag_service.search_context(query, k=10)
+            results = await rag_service.search_context(query, user_id=x_user_id, k=10)
             
             if results:
                 rag_context_str = "\n--- General RAG Context from Knowledge Base ---\n"
@@ -162,14 +164,15 @@ async def plugin_analyze(
             analysis_text = payload.content[:2000]
             print("⚠️ 未检索到 RAG 上下文，使用原始内容摘要")
         
-        # 将生成大纲任务推送到 ARQ 队列
+        # 将生成大纲任务推送到 ARQ 队列（传递 user_id 用于数据隔离）
         arq_pool = request.app.state.arq_pool
         
         job = await arq_pool.enqueue_job(
             'generate_outline_task',
             raw_text=analysis_text,
             user_context=payload.course_name,
-            exam_type=(payload.exam_type or ExamType.final).value
+            exam_type=(payload.exam_type or ExamType.final).value,
+            user_id=x_user_id
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -230,7 +233,8 @@ async def plugin_analyze(
 @router.post("/api/plugin/generate-final", response_model=TaskResponse)
 async def plugin_generate_final(
     request: Request,
-    payload: PluginGenerateRequest = Body(...)
+    payload: PluginGenerateRequest = Body(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
 ) -> TaskResponse:
     """
     Chrome 插件：生成最终 PDF 内容
@@ -244,7 +248,7 @@ async def plugin_generate_final(
     try:
         arq_pool = request.app.state.arq_pool
         
-        # 构造 GenerateSheetRequest 的负载数据
+        # 构造 GenerateSheetRequest 的负载数据（传递 user_id 用于数据隔离）
         task_kwargs = {
             "syllabus": payload.syllabus,
             "user_context": payload.course_name,
@@ -252,6 +256,7 @@ async def plugin_generate_final(
             "academic_level": (payload.education_level or AcademicLevel.undergraduate).value,
             "selected_topics": [topic.model_dump() for topic in payload.selected_topics],
             "exam_type": (payload.exam_type or ExamType.final).value,
+            "user_id": x_user_id,  # 传递 user_id 用于数据隔离
             # 添加额外的元数据，用于 Worker 保存到数据库
             "_metadata": {
                 "course_name": payload.course_name,

@@ -1,7 +1,7 @@
 import traceback
 import time
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
 from pydantic import BaseModel
 
 from app.services.rag_service import get_rag_service
@@ -48,7 +48,10 @@ class ClearResponse(BaseModel):
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest_text(payload: IngestRequest = Body(...)) -> IngestResponse:
+async def ingest_text(
+    payload: IngestRequest = Body(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+) -> IngestResponse:
     """
     将文本摄入到 RAG 知识库
     
@@ -63,7 +66,8 @@ async def ingest_text(payload: IngestRequest = Body(...)) -> IngestResponse:
         rag_service = get_rag_service()
         chunks_count = await rag_service.ingest_text(
             raw_text=payload.text,
-            source_name=payload.source
+            source_name=payload.source,
+            user_id=x_user_id
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -88,7 +92,10 @@ async def ingest_text(payload: IngestRequest = Body(...)) -> IngestResponse:
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search_context(payload: SearchRequest = Body(...)) -> SearchResponse:
+async def search_context(
+    payload: SearchRequest = Body(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+) -> SearchResponse:
     """
     在 RAG 知识库中搜索相关内容
     
@@ -103,6 +110,7 @@ async def search_context(payload: SearchRequest = Body(...)) -> SearchResponse:
         rag_service = get_rag_service()
         results = await rag_service.search_context(
             query=payload.query,
+            user_id=x_user_id,
             k=payload.top_k
         )
         
@@ -133,7 +141,10 @@ async def search_context(payload: SearchRequest = Body(...)) -> SearchResponse:
 
 
 @router.post("/ingest/file", response_model=IngestResponse)
-async def ingest_file(file: UploadFile = File(...)) -> IngestResponse:
+async def ingest_file(
+    file: UploadFile = File(...),
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+) -> IngestResponse:
     """
     将 PDF 文件摄入到 RAG 知识库
     
@@ -164,11 +175,12 @@ async def ingest_file(file: UploadFile = File(...)) -> IngestResponse:
                 detail="仅支持 PDF 文件格式"
             )
         
-        # 调用 RAG 服务处理 PDF
+        # 调用 RAG 服务处理 PDF（传递 user_id 用于数据隔离）
         rag_service = get_rag_service()
         chunks_count = await rag_service.ingest_pdf(
             file_content=content,
-            filename=file.filename or "unknown.pdf"
+            filename=file.filename or "unknown.pdf",
+            user_id=x_user_id
         )
         
         # ========== [性能监控 - 可删除] ==========
