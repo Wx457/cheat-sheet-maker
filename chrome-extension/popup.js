@@ -1,10 +1,9 @@
 // 全局状态管理
-let currentProjectId = null // 暂存第一步分析后的项目 ID（如果需要）
-let currentOutlineData = null // 暂存分析结果
-let extendedTopics = [] // 存储所有主题（AI检测的 + 自定义的）
+let currentProjectId = null
+let currentOutlineData = null
+let extendedTopics = []
 
 // ========== [数据隔离] 用户 ID 管理 ==========
-// 获取或生成用户 ID（UUID），存储在 chrome.storage.local
 async function getOrCreateUserId() {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(['user_id'], (result) => {
@@ -16,14 +15,12 @@ async function getOrCreateUserId() {
       if (result.user_id) {
         resolve(result.user_id)
       } else {
-        // 生成新的 UUID v4
         const newUserId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
           const r = Math.random() * 16 | 0
           const v = c === 'x' ? r : (r & 0x3 | 0x8)
           return v.toString(16)
         })
         
-        // 存储到 chrome.storage.local
         chrome.storage.local.set({ user_id: newUserId }, () => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message))
@@ -37,11 +34,17 @@ async function getOrCreateUserId() {
   })
 }
 
-// 获取请求头（包含 X-User-ID）
 async function getHeaders() {
   const userId = await getOrCreateUserId()
   return {
     'Content-Type': 'application/json',
+    'X-User-ID': userId
+  }
+}
+
+async function getHeadersForFile() {
+  const userId = await getOrCreateUserId()
+  return {
     'X-User-ID': userId
   }
 }
@@ -50,7 +53,7 @@ async function getHeaders() {
 // 获取页面元素
 const viewForm = document.getElementById('view-form')
 const viewOutline = document.getElementById('view-outline')
-const statusEl = document.getElementById('status')
+const statusBar = document.getElementById('statusBar')
 const outlineList = document.getElementById('outline-list')
 const resultArea = document.getElementById('resultArea')
 const downloadLink = document.getElementById('downloadLink')
@@ -58,21 +61,26 @@ const customTopicInput = document.getElementById('customTopicInput')
 const btnAddCustomTopic = document.getElementById('btnAddCustomTopic')
 
 // 按钮元素
-const btnSaveOnly = document.getElementById('btnSaveOnly')
-const btnGenerate = document.getElementById('btnGenerate')
+const btnScanPage = document.getElementById('btnScanPage')
+const btnSaveText = document.getElementById('btnSaveText')
+const btnUploadPdf = document.getElementById('btnUploadPdf')
+const btnNextGenerate = document.getElementById('btnNextGenerate')
 const btnBack = document.getElementById('btnBack')
 const btnConfirmGenerate = document.getElementById('btnConfirmGenerate')
 
+// 标签页元素
+const tabs = document.querySelectorAll('.tab')
+const tabContents = document.querySelectorAll('.tab-content')
+
 // 显示状态消息
-function showStatus(message, type = 'loading') {
-  statusEl.textContent = message
-  statusEl.className = `status-msg ${type}`
-  statusEl.style.display = 'block'
+function showStatusBar(message, type = '') {
+  statusBar.textContent = message
+  statusBar.className = `status-bar ${type}`
 }
 
-// 隐藏状态消息
-function hideStatus() {
-  statusEl.style.display = 'none'
+function clearStatusBar() {
+  statusBar.textContent = ''
+  statusBar.className = 'status-bar'
 }
 
 // 切换视图
@@ -86,6 +94,25 @@ function showView(viewName) {
   }
 }
 
+// 标签页切换
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    const targetTab = tab.dataset.tab
+    
+    // 更新标签页状态
+    tabs.forEach(t => t.classList.remove('active'))
+    tab.classList.add('active')
+    
+    // 更新内容显示
+    tabContents.forEach(content => {
+      content.classList.remove('active')
+      if (content.id === `tab-${targetTab}`) {
+        content.classList.add('active')
+      }
+    })
+  })
+})
+
 // 获取当前标签页信息
 async function getCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -96,8 +123,6 @@ async function getCurrentTab() {
 async function scrapePageContent() {
   try {
     const tab = await getCurrentTab()
-    
-    // 向 content script 发送消息，请求抓取页面内容
     const response = await chrome.tabs.sendMessage(tab.id, { action: 'scrape' })
     
     if (response && response.success && response.text && response.title) {
@@ -167,9 +192,7 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
   
   while (attempts < maxAttempts) {
     try {
-      // 获取请求头（包含 X-User-ID）
       const headers = await getHeaders()
-      
       const response = await fetch(`http://127.0.0.1:8000/api/task/${taskId}`, {
         method: 'GET',
         headers: headers,
@@ -182,53 +205,35 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
       }
       
       const data = await response.json()
-      console.log('轮询任务状态:', { 
-        status: data.status, 
-        hasResult: !!data.result,
-        resultKeys: data.result ? Object.keys(data.result) : null,
-        resultType: data.result ? typeof data.result : null
-      })
       
       if (data.status === 'completed' && data.result) {
-        // 处理生成大纲的返回格式：{success: true, data: {topics: [...]}}
         if (data.result.success && data.result.data) {
-          console.log('检测到生成大纲格式，提取 data:', data.result.data)
           if (expectTopics && data.result.data.topics) {
             return data.result.data
           } else if (!expectTopics) {
-            // 生成小抄不需要 topics，直接返回整个 result
             return data.result
           } else {
-            console.warn('data.result.data 缺少 topics 字段:', data.result.data)
             throw new Error('分析结果缺少 topics 字段')
           }
         } else if (data.result.data) {
-          // 直接包含 data 字段
-          console.log('检测到直接 data 格式，提取 data:', data.result.data)
           if (expectTopics && data.result.data.topics) {
             return data.result.data
           } else if (!expectTopics) {
-            // 生成小抄不需要 topics，直接返回整个 result
             return data.result
           } else {
-            console.warn('data.result.data 缺少 topics 字段:', data.result.data)
             throw new Error('分析结果缺少 topics 字段')
           }
         } else if (!expectTopics && data.result) {
-          // 生成小抄的返回格式：直接返回 result（包含 project_id, file_key 等）
-          console.log('检测到生成小抄格式，返回整个 result:', data.result)
           return data.result
         } else if (data.result.error) {
           throw new Error(data.result.error)
         } else {
-          console.warn('任务完成但结果格式异常:', JSON.stringify(data.result, null, 2))
-          throw new Error('任务完成但结果格式异常，请查看控制台')
+          throw new Error('任务完成但结果格式异常')
         }
       } else if (data.status === 'not_found' || data.error) {
         throw new Error(data.error || '任务未找到')
       }
       
-      // 如果还在处理中，继续轮询
       attempts++
       await new Promise(resolve => setTimeout(resolve, interval))
     } catch (error) {
@@ -244,22 +249,172 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
   throw new Error('任务处理超时（超过2分钟），请重试')
 }
 
-// 第一阶段：分析接口
-async function callAnalyzeAPI(content, formData, url) {
+// ========== 数据收集功能 ==========
+
+// 1. 扫描当前页面并保存
+async function handleScanPage() {
+  btnScanPage.disabled = true
+  showStatusBar('正在扫描页面...', 'loading')
+
   try {
-    // 获取请求头（包含 X-User-ID）
-    const headers = await getHeaders()
+    const { text, title, url } = await scrapePageContent()
     
-    // 提交分析任务
-    const response = await fetch('http://127.0.0.1:8000/api/plugin/analyze', {
+    if (!text || text.trim().length === 0) {
+      throw new Error('页面内容为空，无法保存')
+    }
+
+    const headers = await getHeaders()
+    const sourceName = document.getElementById('courseName').value.trim() || title || url
+
+    const response = await fetch('http://127.0.0.1:8000/api/rag/ingest', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
-        content: content,
-        syllabus: formData.syllabus || null,
-        url: url,
-        course_name: formData.courseName || null,
-        education_level: mapEducationLevel(formData.educationLevel),
+        text: text,
+        source: sourceName
+      })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || '保存失败')
+    }
+
+    const data = await response.json()
+    
+    if (data.status === 'success') {
+      showStatusBar(`✅ 页面已扫描！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
+      setTimeout(clearStatusBar, 3000)
+    } else {
+      throw new Error('保存失败')
+    }
+  } catch (error) {
+    showStatusBar(`❌ 错误: ${error.message}`, 'error')
+    console.error('扫描失败:', error)
+  } finally {
+    btnScanPage.disabled = false
+  }
+}
+
+// 2. 保存粘贴的文本
+async function handleSaveText() {
+  const textInput = document.getElementById('pasteTextInput')
+  const text = textInput.value.trim()
+  
+  if (!text) {
+    showStatusBar('❌ 请输入文本内容', 'error')
+    return
+  }
+
+  btnSaveText.disabled = true
+  showStatusBar('正在保存文本...', 'loading')
+
+  try {
+    const headers = await getHeaders()
+    const sourceName = document.getElementById('courseName').value.trim() || 'User Paste'
+
+    const response = await fetch('http://127.0.0.1:8000/api/rag/ingest', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        text: text,
+        source: sourceName
+      })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || '保存失败')
+    }
+
+    const data = await response.json()
+    
+    if (data.status === 'success') {
+      showStatusBar(`✅ 文本已保存！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
+      textInput.value = '' // 清空输入框
+      setTimeout(clearStatusBar, 3000)
+    } else {
+      throw new Error('保存失败')
+    }
+  } catch (error) {
+    showStatusBar(`❌ 错误: ${error.message}`, 'error')
+    console.error('保存失败:', error)
+  } finally {
+    btnSaveText.disabled = false
+  }
+}
+
+// 3. 上传PDF
+async function handleUploadPdf() {
+  const fileInput = document.getElementById('pdfFileInput')
+  const file = fileInput.files[0]
+  
+  if (!file) {
+    showStatusBar('❌ 请选择PDF文件', 'error')
+    return
+  }
+
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showStatusBar('❌ 仅支持PDF文件格式', 'error')
+    return
+  }
+
+  btnUploadPdf.disabled = true
+  showStatusBar('正在上传PDF...', 'loading')
+
+  try {
+    const headers = await getHeadersForFile()
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch('http://127.0.0.1:8000/api/rag/ingest/file', {
+      method: 'POST',
+      headers: headers,
+      body: formData
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || '上传失败')
+    }
+
+    const data = await response.json()
+    
+    if (data.status === 'success') {
+      showStatusBar(`✅ PDF已上传！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
+      fileInput.value = '' // 清空文件选择
+      setTimeout(clearStatusBar, 3000)
+    } else {
+      throw new Error('上传失败')
+    }
+  } catch (error) {
+    showStatusBar(`❌ 错误: ${error.message}`, 'error')
+    console.error('上传失败:', error)
+  } finally {
+    btnUploadPdf.disabled = false
+  }
+}
+
+// ========== 生成功能 ==========
+
+// 下一步：生成大纲
+async function handleNextGenerate() {
+  btnNextGenerate.disabled = true
+  showStatusBar('正在生成大纲...', 'loading')
+
+  try {
+    const formData = collectFormData()
+    const headers = await getHeaders()
+
+    // 使用 syllabus 作为 raw_text，如果没有则使用通用提示
+    const rawText = formData.syllabus || 'Generate outline from knowledge base based on all accumulated data'
+
+    const response = await fetch('http://127.0.0.1:8000/api/outline', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        raw_text: rawText,
+        user_context: formData.courseName || null,
         exam_type: mapExamType(formData.examType)
       })
     })
@@ -271,7 +426,6 @@ async function callAnalyzeAPI(content, formData, url) {
     }
 
     const taskData = await response.json()
-    console.log('收到任务响应:', taskData)
     const taskId = taskData.task_id
     
     if (!taskId) {
@@ -286,31 +440,40 @@ async function callAnalyzeAPI(content, formData, url) {
       throw new Error('分析结果格式异常：缺少 topics 字段')
     }
     
-    return result
+    // 保存分析结果
+    currentOutlineData = result
+    
+    // 渲染主题复选框列表
+    renderOutlineList(result.topics)
+    
+    // 切换到大纲视图
+    showView('outline')
+    clearStatusBar()
+    
   } catch (error) {
-    console.error('分析失败:', error)
-    throw error
+    showStatusBar(`❌ 错误: ${error.message}`, 'error')
+    console.error('生成失败:', error)
+  } finally {
+    btnNextGenerate.disabled = false
   }
 }
 
-// 渲染主题复选框列表（支持显示扩展主题列表，包括自定义主题）
+// 渲染主题复选框列表
 function renderOutlineList(topics) {
-  outlineList.innerHTML = '' // 清空现有内容
+  outlineList.innerHTML = ''
   
-  // 初始化 extendedTopics：将 AI 检测的主题转换为扩展格式
   if (topics && topics.length > 0) {
     extendedTopics = topics.map(t => ({ ...t, isCustom: false }))
   } else {
     extendedTopics = []
   }
   
-  // 重新渲染所有主题（包括自定义的）
   renderExtendedTopics()
 }
 
-// 渲染扩展主题列表（包括 AI 检测的和自定义的）
+// 渲染扩展主题列表
 function renderExtendedTopics() {
-  outlineList.innerHTML = '' // 清空现有内容
+  outlineList.innerHTML = ''
   
   if (extendedTopics.length === 0) {
     outlineList.innerHTML = '<p style="color: #999; text-align: center;">未检测到主题</p>'
@@ -325,18 +488,15 @@ function renderExtendedTopics() {
     checkbox.type = 'checkbox'
     checkbox.id = `topic-${index}`
     checkbox.value = topic.title
-    checkbox.checked = true // 默认全选
+    checkbox.checked = true
     checkbox.dataset.isCustom = topic.isCustom ? 'true' : 'false'
     
     const label = document.createElement('label')
     label.htmlFor = `topic-${index}`
     
-    // 构建标签文本
     if (!topic.isCustom) {
-      // AI 检测的主题：显示相关性分数
       label.textContent = `${topic.title} (相关性: ${(topic.relevance_score * 100).toFixed(0)}%)`
     } else {
-      // 自定义主题：显示标题 + 自定义标记
       label.appendChild(document.createTextNode(topic.title))
       const customTag = document.createElement('span')
       customTag.className = 'topic-custom-tag'
@@ -354,24 +514,20 @@ function renderExtendedTopics() {
 function handleAddCustomTopic() {
   const trimmed = customTopicInput.value.trim()
   
-  // 验证输入
   if (!trimmed) {
     return
   }
   
-  // 检查是否已存在
   if (extendedTopics.some(t => t.title === trimmed)) {
     customTopicInput.value = ''
     return
   }
   
-  // 计算 AI 检测主题的平均权重
   const aiTopics = extendedTopics.filter(t => !t.isCustom)
   const avgScore = aiTopics.length > 0
     ? aiTopics.reduce((sum, t) => sum + t.relevance_score, 0) / aiTopics.length
-    : 0.5  // 如果没有 AI 主题，默认使用 0.5
+    : 0.5
   
-  // 添加自定义主题
   const newTopic = {
     title: trimmed,
     relevance_score: avgScore,
@@ -381,20 +537,16 @@ function handleAddCustomTopic() {
   extendedTopics.push(newTopic)
   customTopicInput.value = ''
   
-  // 重新渲染列表
   renderExtendedTopics()
-  
-  // 更新添加按钮状态
   updateAddButtonState()
 }
 
-// 收集选中的主题（包括自定义主题）
+// 收集选中的主题
 function collectSelectedTopics() {
   const checkboxes = outlineList.querySelectorAll('input[type="checkbox"]:checked')
   const selectedTopics = []
   
   checkboxes.forEach(checkbox => {
-    // 从 extendedTopics 中找到对应的 topic（包括自定义的）
     const topic = extendedTopics.find(t => t.title === checkbox.value)
     if (topic) {
       selectedTopics.push({
@@ -413,13 +565,29 @@ function updateAddButtonState() {
   btnAddCustomTopic.disabled = !trimmed || extendedTopics.some(t => t.title === trimmed)
 }
 
-// 第二阶段：生成最终内容接口
-async function callGenerateFinalAPI(selectedTopics, formData) {
+// 处理返回按钮
+function handleBack() {
+  showView('form')
+  clearStatusBar()
+  if (customTopicInput) {
+    customTopicInput.value = ''
+  }
+}
+
+// 处理确认并生成
+async function handleConfirmGenerate() {
+  btnConfirmGenerate.disabled = true
+  showStatusBar('正在生成小抄...', 'loading')
+
   try {
-    // 获取请求头（包含 X-User-ID）
-    const headers = await getHeaders()
+    const formData = collectFormData()
+    const selectedTopics = collectSelectedTopics()
     
-    // 提交生成任务
+    if (selectedTopics.length === 0) {
+      throw new Error('请至少选择一个主题')
+    }
+
+    const headers = await getHeaders()
     const response = await fetch('http://127.0.0.1:8000/api/plugin/generate-final', {
       method: 'POST',
       headers: headers,
@@ -440,176 +608,37 @@ async function callGenerateFinalAPI(selectedTopics, formData) {
     }
 
     const taskData = await response.json()
-    console.log('收到生成任务响应:', taskData)
     const taskId = taskData.task_id
     
     if (!taskId) {
       throw new Error('未收到任务ID，请重试')
     }
     
-    // 轮询任务状态（expectTopics = false，因为生成小抄不需要 topics）
-    showStatus('正在生成小抄...', 'loading')
-    const result = await pollTaskStatus(taskId, 120, 3000, false) // 最多轮询120次，每次3秒（6分钟）
+    const result = await pollTaskStatus(taskId, 120, 3000, false)
     
     console.log('生成结果:', result)
     
-    // 生成小抄的返回格式：{status: "completed", file_key: ..., project_id: ..., data: {...}}
-    // result 就是整个返回的字典
     if (result && result.project_id) {
-      return { project_id: result.project_id }
+      currentProjectId = result.project_id
     } else if (result && typeof result === 'object') {
-      // 如果 result 是字典，尝试查找 project_id
       const projectId = result.project_id || result.data?.project_id
       if (projectId) {
-        return { project_id: projectId }
+        currentProjectId = projectId
       }
     }
     
-    console.error('生成结果格式异常，未找到 project_id:', result)
-    throw new Error('生成结果格式异常：未找到 project_id，请查看控制台')
-  } catch (error) {
-    console.error('生成失败:', error)
-    throw error
-  }
-}
-
-// 处理"仅保存"按钮点击
-async function handleSaveOnly() {
-  btnSaveOnly.disabled = true
-  showStatus('正在抓取页面内容...', 'loading')
-
-  try {
-    // 1. 抓取页面内容
-    const { text, title, url } = await scrapePageContent()
-    
-    if (!text || text.trim().length === 0) {
-      throw new Error('页面内容为空，无法保存')
+    if (!currentProjectId) {
+      throw new Error('生成结果格式异常：未找到 project_id')
     }
 
-    // 2. 保存到知识库（使用旧的接口）
-    showStatus('正在保存到知识库...', 'loading')
-    
-    // 获取请求头（包含 X-User-ID）
-    const headers = await getHeaders()
-    
-    const saveResponse = await fetch('http://127.0.0.1:8000/api/rag/ingest', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({
-        text: text,
-        source: url || title
-      })
-    })
-
-    if (!saveResponse.ok) {
-      const errorData = await saveResponse.json().catch(() => ({}))
-      throw new Error(errorData.detail || '保存失败')
-    }
-
-    const saveData = await saveResponse.json()
-    
-    if (saveData.status === 'success') {
-      showStatus(`✅ 成功保存！共处理 ${saveData.chunks_count} 个切片`, 'success')
-    } else {
-      throw new Error('保存失败')
-    }
-  } catch (error) {
-    showStatus(`❌ 错误: ${error.message}`, 'error')
-    console.error('保存失败:', error)
-  } finally {
-    btnSaveOnly.disabled = false
-  }
-}
-
-// 处理"一键生成"按钮点击（第一阶段）
-async function handleGenerate() {
-  btnGenerate.disabled = true
-  showStatus('正在抓取页面内容...', 'loading')
-
-  try {
-    // 1. 抓取页面内容
-    const { text, title, url } = await scrapePageContent()
-    
-    if (!text || text.trim().length === 0) {
-      throw new Error('页面内容为空，无法生成')
-    }
-
-    // 2. 收集表单数据
-    const formData = collectFormData()
-
-    // 3. 调用分析接口
-    showStatus('正在提交分析任务...', 'loading')
-    const analyzeResult = await callAnalyzeAPI(text, formData, url)
-    
-    console.log('分析结果:', analyzeResult)
-    
-    // 4. 保存分析结果
-    currentOutlineData = analyzeResult
-    
-    // 5. 渲染主题复选框列表
-    if (!analyzeResult || !analyzeResult.topics) {
-      throw new Error('分析结果格式异常：未找到 topics 字段')
-    }
-    
-    renderOutlineList(analyzeResult.topics)
-    
-    // 6. 切换到大纲视图
-    showView('outline')
-    hideStatus()
-    
-  } catch (error) {
-    showStatus(`❌ 错误: ${error.message}`, 'error')
-    console.error('生成失败:', error)
-  } finally {
-    btnGenerate.disabled = false
-  }
-}
-
-// 处理"返回修改"按钮点击
-function handleBack() {
-  showView('form')
-  hideStatus()
-  // 清空自定义主题输入框
-  if (customTopicInput) {
-    customTopicInput.value = ''
-  }
-}
-
-// 处理"确认并生成"按钮点击（第二阶段）
-async function handleConfirmGenerate() {
-  btnConfirmGenerate.disabled = true
-  showStatus('正在生成小抄...', 'loading')
-
-  try {
-    // 1. 收集表单数据
-    const formData = collectFormData()
-    
-    // 2. 收集选中的主题
-    const selectedTopics = collectSelectedTopics()
-    
-    if (selectedTopics.length === 0) {
-      throw new Error('请至少选择一个主题')
-    }
-
-    // 3. 调用生成接口
-    const generateResult = await callGenerateFinalAPI(selectedTopics, formData)
-    
-    // 4. 检查是否有 project_id
-    if (!generateResult.project_id) {
-      throw new Error('生成失败：未返回项目ID')
-    }
-
-    // 5. 调用 PDF 下载接口
-    showStatus('正在生成 PDF...', 'loading')
-    
-    // 获取请求头（包含 X-User-ID）
-    const headers = await getHeaders()
-    
+    // 调用 PDF 下载接口
+    showStatusBar('正在生成 PDF...', 'loading')
+    const pdfHeaders = await getHeaders()
     const pdfResponse = await fetch(
-      `http://127.0.0.1:8000/api/plugin/download-cheat-sheet/${generateResult.project_id}`,
+      `http://127.0.0.1:8000/api/plugin/download-cheat-sheet/${currentProjectId}`,
       {
         method: 'GET',
-        headers: headers
+        headers: pdfHeaders
       }
     )
 
@@ -618,22 +647,19 @@ async function handleConfirmGenerate() {
       throw new Error(errorData.detail || `PDF 生成失败: ${pdfResponse.status}`)
     }
 
-    // 6. 获取 PDF 二进制数据并创建下载链接
     const pdfBlob = await pdfResponse.blob()
     const pdfUrl = URL.createObjectURL(pdfBlob)
     
     downloadLink.href = pdfUrl
-    downloadLink.download = `cheat-sheet-${generateResult.project_id}.pdf`
+    downloadLink.download = `cheat-sheet-${currentProjectId}.pdf`
     downloadLink.textContent = '下载生成的 Cheat Sheet (PDF)'
     resultArea.style.display = 'block'
     
-    showStatus('✅ 生成成功！', 'success')
-    
-    // 切换回表单视图，显示结果
+    showStatusBar('✅ 生成成功！', 'success')
     showView('form')
     
   } catch (error) {
-    showStatus(`❌ 错误: ${error.message}`, 'error')
+    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('生成失败:', error)
   } finally {
     btnConfirmGenerate.disabled = false
@@ -641,8 +667,10 @@ async function handleConfirmGenerate() {
 }
 
 // 绑定事件
-btnSaveOnly.addEventListener('click', handleSaveOnly)
-btnGenerate.addEventListener('click', handleGenerate)
+btnScanPage.addEventListener('click', handleScanPage)
+btnSaveText.addEventListener('click', handleSaveText)
+btnUploadPdf.addEventListener('click', handleUploadPdf)
+btnNextGenerate.addEventListener('click', handleNextGenerate)
 btnBack.addEventListener('click', handleBack)
 btnConfirmGenerate.addEventListener('click', handleConfirmGenerate)
 
@@ -658,11 +686,8 @@ if (btnAddCustomTopic && customTopicInput) {
   })
   
   customTopicInput.addEventListener('input', updateAddButtonState)
-  
-  // 初始化按钮状态
   updateAddButtonState()
 }
 
 // 页面加载时初始化
-// 默认显示表单视图
 showView('form')
