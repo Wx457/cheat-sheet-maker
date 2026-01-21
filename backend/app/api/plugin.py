@@ -1,27 +1,23 @@
 import asyncio
 import traceback
 import time
-from datetime import datetime
+from typing import Optional
 from bson import ObjectId
-from pymongo import MongoClient
 from fastapi import APIRouter, Body, HTTPException, Request, Header
 from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import Optional
+from pymongo import MongoClient
 
 from app.schemas import (
     CheatSheetSchema,
     PluginAnalyzeRequest,
     PluginGenerateRequest,
-    TopicInput,
-    GenerateSheetRequest,
     AcademicLevel,
     ExamType,
     PageLimit,
 )
-from app.services.rag_service import get_rag_service
-from app.services.cleaner import clean_raw_text
-from app.services.pdf_service import generate_pdf_via_browser
+from app.application.services.ingestion_service import IngestionService
+from app.infrastructure.pdf.renderer import generate_pdf_via_browser
 from app.core.config import settings
 
 router = APIRouter()
@@ -94,18 +90,13 @@ async def plugin_analyze(
     # ========== [性能监控 - 可删除] ==========
     
     try:
-        rag_service = get_rag_service()
-        
-        # ========== [性能监控 - 可删除] ==========
+        ingestion = IngestionService.default()
+
         ingest_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
-        
-        # Step 1: 保存内容到向量库（传递 user_id 用于数据隔离）
-        source_name = payload.course_name or payload.url
-        chunks_count = await rag_service.ingest_text(
-            raw_text=payload.content,
-            source_name=source_name,
-            user_id=x_user_id
+        chunks_count = await ingestion.process_text(
+            text=payload.content,
+            metadata={"course_name": payload.course_name, "url": payload.url, "source": payload.course_name or payload.url},
+            user_id=x_user_id,
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -123,27 +114,22 @@ async def plugin_analyze(
         # 注意：刚保存的内容已经进入向量库，可以立即检索到
         rag_context_str = ""
         if payload.syllabus:
-            # 如果提供了 syllabus，使用 syllabus 作为查询词进行精准检索（传递 user_id 用于数据隔离）
-            query = clean_raw_text(payload.syllabus)
-            results = await rag_service.search_context(query, user_id=x_user_id, k=10)
-            
+            query = payload.syllabus
+            results = await ingestion.rag_service.search_context(query, user_id=x_user_id, k=10)
             if results:
                 rag_context_str = "\n--- RAG Context from Knowledge Base (filtered by syllabus) ---\n"
-                for result in results:
-                    rag_context_str += f"Source: {result['source']}\n"
-                    rag_context_str += f"Content: {result['content']}\n"
+                for r in results:
+                    rag_context_str += f"Source: {r['source']}\n"
+                    rag_context_str += f"Content: {r['content']}\n"
                     rag_context_str += "---------------------------------------\n"
         else:
-            # 如果没有 syllabus，使用课程名称或内容摘要作为查询词
-            # 优先使用课程名称，如果没有则使用内容摘要（传递 user_id 用于数据隔离）
-            query = payload.course_name or payload.content[:300] if len(payload.content) > 300 else payload.content
-            results = await rag_service.search_context(query, user_id=x_user_id, k=10)
-            
+            query = payload.course_name or (payload.content[:300] if len(payload.content) > 300 else payload.content)
+            results = await ingestion.rag_service.search_context(query, user_id=x_user_id, k=10)
             if results:
                 rag_context_str = "\n--- General RAG Context from Knowledge Base ---\n"
-                for result in results:
-                    rag_context_str += f"Source: {result['source']}\n"
-                    rag_context_str += f"Content: {result['content']}\n"
+                for r in results:
+                    rag_context_str += f"Source: {r['source']}\n"
+                    rag_context_str += f"Content: {r['content']}\n"
                     rag_context_str += "---------------------------------------\n"
         
         # ========== [性能监控 - 可删除] ==========
@@ -471,8 +457,8 @@ async def reset_knowledge_base(
     Chrome 插件：重置当前用户的知识库（向量数据）。
     """
     try:
-        rag_service = get_rag_service()
-        deleted_count = await asyncio.to_thread(rag_service.delete_user_data, x_user_id)
+        ingestion = IngestionService.default()
+        deleted_count = await asyncio.to_thread(ingestion.rag_service.delete_user_data, x_user_id)
         return {"status": "success", "deleted_count": int(deleted_count)}
     except Exception as e:
         traceback.print_exc()

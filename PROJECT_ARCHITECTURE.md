@@ -7,6 +7,9 @@ cheat-sheet-maker/
 │
 ├── backend/                          # 后端服务 (FastAPI)
 │   ├── main.py                       # FastAPI 应用入口
+│   │   ├── lifespan()                # 启停时创建/关闭 ARQ Redis 连接池
+│   │   ├── setup_mongodb_ttl_indexes # 创建 MongoDB TTL 索引（projects/vectors）
+│   │   └── health()                  # 健康检查
 │   ├── requirements.txt              # Python 依赖包
 │   │
 │   ├── app/                          # 应用主目录
@@ -15,9 +18,19 @@ cheat-sheet-maker/
 │   │   ├── api/                      # API 路由层
 │   │   │   ├── __init__.py
 │   │   │   ├── generate.py           # 生成 Cheat Sheet 的 API (异步任务模式)
+│   │   │   │   ├── generate_outline()      # 入队 generate_outline_task，返回 task_id
+│   │   │   │   └── generate_cheat_sheet()  # 入队 generate_cheat_sheet_task，传递用户上下文
 │   │   │   ├── plugin.py             # Chrome 插件相关 API (异步任务模式)
+│   │   │   │   ├── _create_error_response() # 统一结构化错误包装
+│   │   │   │   ├── plugin_analyze()        # 摄入网页文本→RAG 检索→入队大纲任务
+│   │   │   │   └── plugin_generate_final() # 根据选题入队小抄生成任务（含元数据）
 │   │   │   ├── rag.py                # RAG 知识库 API (摄入/搜索/清理)
+│   │   │   │   ├── ingest_text()          # 文本切片后写入向量库（按 user_id 隔离）
+│   │   │   │   ├── search_context()       # 基于向量检索相关片段
+│   │   │   │   ├── ingest_file()          # 读取 PDF→提取文本→向量化存储
+│   │   │   │   └── clear_vector_data()    # 清理旧向量数据防止维度不匹配
 │   │   │   └── task.py               # 任务状态查询 API
+│   │   │       └── get_task_status()      # 查询 ARQ 任务状态并返回预签名下载链接
 │   │   │
 │   │   ├── core/                     # 核心配置
 │   │   │   ├── __init__.py
@@ -26,21 +39,54 @@ cheat-sheet-maker/
 │   │   ├── schemas/                  # 数据模型定义
 │   │   │   ├── __init__.py
 │   │   │   └── cheat_sheet.py        # Cheat Sheet 相关 Schema
+│   │   │       ├── GenerateOutlineRequest / GenerateSheetRequest # 请求载体/枚举定义
+│   │   │       ├── PluginAnalyzeRequest / PluginGenerateRequest  # 插件端请求模型
+│   │   │       └── CheatSheetSchema / OutlineResponse           # LLM 输出/小抄结构
 │   │   │
-│   │   ├── services/                 # 业务逻辑层
-│   │   │   ├── cleaner.py            # 文本清理服务
-│   │   │   ├── embedding_service.py  # OpenAI Embedding 服务
-│   │   │   ├── llm.py                # Gemini LLM 服务
-│   │   │   ├── parser.py             # 解析服务
-│   │   │   ├── pdf_service.py        # PDF 处理服务
-│   │   │   ├── rag_service.py        # RAG 服务 (向量存储/检索)
-│   │   │   └── storage.py            # MinIO/S3 存储服务
+│   │   ├── application/services/     # 用例级编排层（Application Layer）
+│   │   │   ├── ingestion_service.py
+│   │   │   │   ├── IngestionService.process_text() # 清洗→向量化写入
+│   │   │   │   └── IngestionService.process_file() # 校验PDF→解析→写入
+│   │   │   └── cheat_sheet_service.py
+│   │   │       ├── CheatSheetService.generate_outline()      # 调用 Gemini 生成大纲
+│   │   │       └── CheatSheetService.create_cheat_sheet_flow() # RAG→预算→LLM→清洗→PDF→上传→入库
 │   │   │
-│   │   └── utils/                     # 工具函数
-│   │       ├── __init__.py
-│   │       └── html_generator.py     # HTML 生成器
+│   │   ├── domain/                   # 纯业务规则与提示（Domain Layer）
+│   │   │   ├── rules/budget.py
+│   │   │   │   └── BudgetRule.calculate()     # 按页数/相关性分配条目预算
+│   │   │   ├── prompts/templates.py
+│   │   │   │   ├── CheatSheetPrompts.render_outline_prompt()  # 大纲提示词
+│   │   │   │   └── CheatSheetPrompts.render_cheatsheet_prompt() # 小抄提示词
+│   │   │   └── utils/
+│   │   │       ├── cleaner.py
+│   │   │       │   ├── clean_raw_text()        # 输入清洗（去零宽字符/空白压缩/剥离 HTML）
+│   │   │       │   └── repair_json_string()    # LLM JSON 修复
+│   │   │       └── math_formatter.py
+│   │   │           └── normalize_equation()      # 公式统一 $$ 包裹
+│   │   │
+│   │   ├── infrastructure/           # 底层客户端（Infrastructure Layer）
+│   │   │   ├── llm/
+│   │   │   │   ├── gemini_client.py
+│   │   │   │   │   └── GeminiClient.generate_text()/generate_json() # 带重试的 Gemini 调用
+│   │   │   │   └── openai_client.py
+│   │   │   │       └── OpenAIClient.embed_documents()/embed_query() # OpenAI Embedding
+│   │   │   ├── pdf/renderer.py
+│   │   │   │   └── generate_pdf_via_browser() # Playwright 渲染前端静态页生成 PDF
+│   │   │   ├── rag/vector_store.py
+│   │   │   │   ├── VectorStore.ingest_text()/ingest_pdf() # 切片→向量化→MongoDB
+│   │   │   │   ├── search_context_mmr()/search_context() # 基于 user_id 的检索/MMR 去重
+│   │   │   │   ├── delete_user_data()/clear_vector_data() # 用户/全量向量清理
+│   │   │   │   └── get_vector_store()   # 单例获取 VectorStore
+│   │   │   └── storage/minio_client.py
+│   │   │       ├── MinIOClient.ensure_bucket()    # 创建/检查桶
+│   │   │       ├── upload_file()                  # 上传文件到 MinIO/S3
+│   │   │       ├── get_presigned_url()            # 生成预签名 URL
+│   │   │       └── get_minio_client()             # 单例获取 MinIOClient
 │   │
 │   ├── worker.py                     # ARQ Worker 进程 (独立运行)
+│   │   ├── generate_outline_task()   # 任务：调用 CheatSheetService.generate_outline
+│   │   ├── generate_cheat_sheet_task() # 任务：调用 CheatSheetService.create_cheat_sheet_flow
+│   │   └── WorkerSettings            # ARQ 配置/任务列表
 │   ├── tipstxt/                      # 提示词文件
 │   │   ├── bashOrder.txt
 │   │   ├── cheat-sheet-maker.txt

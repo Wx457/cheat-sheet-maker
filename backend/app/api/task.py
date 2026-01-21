@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from arq.jobs import Job
 
-from app.services.storage import get_storage_service
+from app.infrastructure.storage.minio_client import get_minio_client
 
 router = APIRouter()
 
@@ -69,8 +69,8 @@ async def get_task_status(
                 # 如果结果包含 file_key，生成预签名 URL
                 if isinstance(result, dict) and result.get('file_key'):
                     file_key = result.get('file_key')
-                    storage_service = get_storage_service()
-                    download_url = storage_service.get_presigned_url(file_key)
+                    storage_client = get_minio_client()
+                    download_url = storage_client.get_presigned_url(file_key)
                     
                     # 将 download_url 添加到结果中
                     if download_url:

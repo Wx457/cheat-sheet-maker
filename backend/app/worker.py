@@ -3,67 +3,15 @@ ARQ Worker 进程
 监听 Redis 队列，执行耗时的 LLM 和 PDF 生成任务
 """
 import traceback
-import base64
 import time
 from typing import Dict, Any
-from datetime import datetime
 
 from arq.connections import RedisSettings
 from arq.worker import Worker
 
-from app.services.llm import generate_outline, generate_cheat_sheet
-from app.services.pdf_service import generate_pdf_via_browser
-from app.services.storage import get_storage_service
-from app.schemas import (
-    GenerateSheetRequest,
-    CheatSheetSchema,
-    ExamType
-)
+from app.application.services.cheat_sheet_service import CheatSheetService
+from app.schemas import GenerateSheetRequest, ExamType
 from app.core.config import settings
-
-
-# 数据清洗函数
-
-def normalize_equation(content: str) -> str:
-    """强制给公式加上 $$ 包裹"""
-    if not content: 
-        return ""
-    content = content.strip()
-    
-    # 移除可能存在的 \[ \]
-    if content.startswith(r"\[") and content.endswith(r"\]"):
-        content = content[2:-2].strip()
-        
-    # 如果已经是 $$ 包裹，直接返回
-    if content.startswith("$$") and content.endswith("$$"):
-        return content
-        
-    # 如果是行内 $ 包裹，改成 $$
-    if content.startswith("$") and content.endswith("$"):
-        return "$$" + content[1:-1] + "$$"
-        
-    # 裸奔的 LaTeX，加上 $$
-    return f"$${content}$$"
-
-
-def clean_equation_data(content_dict: Dict[str, Any]) -> None:
-    """
-    清洗 cheat sheet 数据中的公式内容
-    
-    Args:
-        content_dict: CheatSheet 数据的字典（会被原地修改）
-    """
-    try:
-        print("正在清洗公式数据...")
-        for section in content_dict.get("sections", []):
-            for item in section.get("items", []):
-                if item.get("type") == "equation":
-                    raw = item.get("content", "")
-                    # 洗干净再放回去
-                    item["content"] = normalize_equation(raw)
-        print("✅ 公式数据清洗完成")
-    except Exception as e:
-        print(f"⚠️ 清洗数据时出错 (非致命): {e}")
 
 
 # ARQ 任务函数定义
@@ -100,12 +48,8 @@ async def generate_outline_task(
         # ========== [性能监控 - 可删除] ==========
         llm_start_time = time.time()
         
-        # 调用生成函数
-        result = generate_outline(
-            text=raw_text,
-            context=user_context,
-            exam_type=exam_type_enum
-        )
+        service = CheatSheetService.default()
+        result = service.generate_outline(text=raw_text, context=user_context, exam_type=exam_type_enum)
         
         # ========== [性能监控 - 可删除] ==========
         llm_elapsed = time.time() - llm_start_time
@@ -174,98 +118,8 @@ async def generate_cheat_sheet_task(
         # ========== [性能监控 - 可删除] ==========
         llm_start_time = time.time()
         
-        # Step 1: 调用 LLM 生成函数（传递 user_id 用于数据隔离，必需参数）
-        result = await generate_cheat_sheet(generate_request, user_id=user_id)
-        
-        # ========== [性能监控 - 可删除] ==========
-        llm_elapsed = time.time() - llm_start_time
-        print(f"⏱️ [性能监控] Step 1 - LLM 生成小抄内容耗时: {llm_elapsed:.2f} 秒")
-        db_start_time = time.time()
-        
-        # Step 2: 如果包含元数据，保存到数据库
-        project_id = None
-        if metadata:
-            from pymongo import MongoClient
-            from datetime import datetime
-            
-            client = MongoClient(settings.MONGODB_URI)
-            db = client[settings.DB_NAME]
-            projects_collection = db["projects"]
-            
-            # 构建项目数据
-            project_data = {
-                "cheat_sheet": result.model_dump(),
-                "course_name": metadata.get("course_name"),
-                "syllabus": metadata.get("syllabus"),
-                "education_level": metadata.get("education_level"),
-                "exam_type": metadata.get("exam_type"),
-                "page_limit": metadata.get("page_limit"),
-                "selected_topics": metadata.get("selected_topics", []),
-                "created_at": datetime.utcnow(),
-            }
-            
-            # 插入数据库
-            insert_result = projects_collection.insert_one(project_data)
-            project_id = str(insert_result.inserted_id)
-            client.close()
-        
-        # ========== [性能监控 - 可删除] ==========
-        db_elapsed = time.time() - db_start_time
-        if metadata:
-            print(f"⏱️ [性能监控] Step 2 - 保存到数据库耗时: {db_elapsed:.2f} 秒")
-
-        clean_start_time = time.time()
-        
-        # Step 3: 清洗数据（清洗 LLM 返回的公式格式）
-        cheat_sheet_dict = result.model_dump()
-        clean_equation_data(cheat_sheet_dict)
-        
-        # ========== [性能监控 - 可删除] ==========
-        clean_elapsed = time.time() - clean_start_time
-        print(f"⏱️ [性能监控] Step 3 - 清洗数据耗时: {clean_elapsed:.2f} 秒")
-        pdf_start_time = time.time()
-        
-        # Step 4: 生成 PDF（使用 React 前端渲染）
-        # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
-        # PDF 服务会访问 React 静态页面并注入数据
-        pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
-        
-        # ========== [性能监控 - 可删除] ==========
-        pdf_elapsed = time.time() - pdf_start_time
-        print(f"⏱️ [性能监控] Step 4 - 生成 PDF 耗时: {pdf_elapsed:.2f} 秒")
-
-        upload_start_time = time.time()
-        
-        # Step 5: 上传到 MinIO
-        storage_service = get_storage_service()
-        
-        # 生成文件名（使用小抄标题和时间戳）
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_title = "".join(c for c in result.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        safe_title = safe_title.replace(' ', '_')[:50]  # 限制长度
-        filename = f"{safe_title}_{timestamp}.pdf"
-        
-        # 上传文件
-        file_key = storage_service.upload_file(pdf_bytes, filename)
-        
-        if not file_key:
-            raise ValueError("PDF 上传到 MinIO 失败")
-        
-        # ========== [性能监控 - 可删除] ==========
-        upload_elapsed = time.time() - upload_start_time
-        print(f"⏱️ [性能监控] Step 5 - 上传到 MinIO 耗时: {upload_elapsed:.2f} 秒")
-        
-        # Step 6: 返回结果（包含 file_key 和 project_id）
-        result_data = {
-            "status": "completed",
-            "file_key": file_key,
-            "size": len(pdf_bytes),
-            "filename": filename,
-            "data": result.model_dump()  # 保留原始数据用于兼容
-        }
-        
-        if project_id:
-            result_data["project_id"] = project_id
+        service = CheatSheetService.default()
+        result_data = await service.create_cheat_sheet_flow(generate_request, user_id=user_id, metadata=metadata)
         
         # ========== [性能监控 - 可删除] ==========
         total_elapsed = time.time() - task_start_time
@@ -301,70 +155,7 @@ async def generate_pdf_task(
     task_start_time = time.time()
     print(f"⏱️ [性能监控] generate_pdf_task 开始执行")
     
-    try:
-        if not cheat_sheet:
-            raise ValueError("缺少 cheat_sheet 数据")
-        
-        # 验证数据格式（可选）
-        cheat_sheet_obj = CheatSheetSchema(**cheat_sheet)
-        
-        # ========== [性能监控 - 可删除] ==========
-        clean_start_time = time.time()
-        
-        # 清洗数据（清洗公式格式）
-        clean_equation_data(cheat_sheet)
-        
-        # ========== [性能监控 - 可删除] ==========
-        clean_elapsed = time.time() - clean_start_time
-        print(f"⏱️ [性能监控] 清洗数据耗时: {clean_elapsed:.2f} 秒")
-        pdf_start_time = time.time()
-        
-        # 生成 PDF（使用 React 前端渲染）
-        # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
-        pdf_bytes = await generate_pdf_via_browser(cheat_sheet)
-        
-        # ========== [性能监控 - 可删除] ==========
-        pdf_elapsed = time.time() - pdf_start_time
-        print(f"⏱️ [性能监控] 生成 PDF 耗时: {pdf_elapsed:.2f} 秒")
-        upload_start_time = time.time()
-        
-        # 上传到 MinIO
-        storage_service = get_storage_service()
-        
-        # 生成文件名（使用小抄标题和时间戳）
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_title = "".join(c for c in cheat_sheet_obj.title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        safe_title = safe_title.replace(' ', '_')[:50]  # 限制长度
-        filename = f"{safe_title}_{timestamp}.pdf"
-        
-        # 上传文件
-        file_key = storage_service.upload_file(pdf_bytes, filename)
-        
-        if not file_key:
-            raise ValueError("PDF 上传到 MinIO 失败")
-        
-        # ========== [性能监控 - 可删除] ==========
-        upload_elapsed = time.time() - upload_start_time
-        print(f"⏱️ [性能监控] 上传到 MinIO 耗时: {upload_elapsed:.2f} 秒")
-        total_elapsed = time.time() - task_start_time
-        print(f"⏱️ [性能监控] generate_pdf_task 总耗时: {total_elapsed:.2f} 秒")
-        
-        # 返回结果（包含 file_key）
-        return {
-            "status": "completed",
-            "file_key": file_key,
-            "size": len(pdf_bytes),
-            "filename": filename
-        }
-    except Exception as e:
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - task_start_time
-        print(f"⏱️ [性能监控] generate_pdf_task 失败，总耗时: {total_elapsed:.2f} 秒")
-        return {
-            "status": "failed",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
+    raise NotImplementedError("generate_pdf_task 已弃用：请使用 create_cheat_sheet_flow 统一流程。")
 
 
 # ARQ Worker 配置
@@ -384,7 +175,6 @@ class WorkerSettings:
     functions = [
         generate_outline_task,
         generate_cheat_sheet_task,
-        generate_pdf_task,
     ]
     
     # Worker 配置
@@ -398,9 +188,10 @@ class WorkerSettings:
 async def startup(ctx):
     """Worker 启动时执行"""
     print("🚀 ARQ Worker 启动...")
-    # 确保 MinIO Bucket 存在
-    storage_service = get_storage_service()
-    storage_service.ensure_bucket()
+    # 触发依赖初始化（如存储桶检查）
+    _ = CheatSheetService.default()
+    from app.infrastructure.storage.minio_client import get_minio_client
+    get_minio_client()  # 这会自动调用 ensure_bucket()
 
 
 async def shutdown(ctx):

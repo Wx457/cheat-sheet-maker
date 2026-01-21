@@ -4,7 +4,7 @@ import time
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
 from pydantic import BaseModel
 
-from app.services.rag_service import get_rag_service
+from app.application.services.ingestion_service import IngestionService
 
 
 router = APIRouter()
@@ -63,11 +63,11 @@ async def ingest_text(
     # ========== [性能监控 - 可删除] ==========
     
     try:
-        rag_service = get_rag_service()
-        chunks_count = await rag_service.ingest_text(
-            raw_text=payload.text,
-            source_name=payload.source,
-            user_id=x_user_id
+        ingestion = IngestionService.default()
+        chunks_count = await ingestion.process_text(
+            text=payload.text,
+            metadata={"source": payload.source},
+            user_id=x_user_id,
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -107,8 +107,8 @@ async def search_context(
     # ========== [性能监控 - 可删除] ==========
     
     try:
-        rag_service = get_rag_service()
-        results = await rag_service.search_context(
+        ingestion = IngestionService.default()
+        results = await ingestion.rag_service.search_context(
             query=payload.query,
             user_id=x_user_id,
             k=payload.top_k
@@ -175,12 +175,11 @@ async def ingest_file(
                 detail="仅支持 PDF 文件格式"
             )
         
-        # 调用 RAG 服务处理 PDF（传递 user_id 用于数据隔离）
-        rag_service = get_rag_service()
-        chunks_count = await rag_service.ingest_pdf(
+        ingestion = IngestionService.default()
+        chunks_count = await ingestion.process_file(
             file_content=content,
             filename=file.filename or "unknown.pdf",
-            user_id=x_user_id
+            user_id=x_user_id,
         )
         
         # ========== [性能监控 - 可删除] ==========
@@ -217,8 +216,8 @@ async def clear_vector_data() -> ClearResponse:
     注意：此操作会删除所有向量数据，请谨慎使用。
     """
     try:
-        rag_service = get_rag_service()
-        deleted_count = rag_service.clear_vector_data()
+        ingestion = IngestionService.default()
+        deleted_count = ingestion.rag_service.clear_vector_data()
         
         return ClearResponse(
             status="success",

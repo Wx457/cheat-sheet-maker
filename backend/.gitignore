@@ -17,3 +17,6 @@ service_test.py
 test_key.py
 
 tipstxt/
+
+BACKEND_ARCHITECTURE.md
+PROJECT_ARCHITECTURE.md
