@@ -26,7 +26,7 @@ async function getOrCreateUserId() {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message))
           } else {
-            console.log('✅ 已生成并存储新的用户 ID:', newUserId)
+            console.log('✅ New user ID generated and stored:', newUserId)
             resolve(newUserId)
           }
         })
@@ -116,7 +116,7 @@ function persistChunkCount() {
   try {
     chrome.storage.local.set({ chunk_count: chunkCount })
   } catch (e) {
-    console.error('保存 chunk_count 失败', e)
+    console.error('Failed to save chunk_count', e)
   }
 }
 
@@ -126,7 +126,7 @@ let headerCollapsed = false
 function buildHeaderSummary() {
   if (!headerSummaryMain) return
   const { courseName, examType, pageLimit } = collectFormData()
-  const title = courseName || '课程未填写'
+  const title = courseName || 'Course Name not filled'
   headerSummaryMain.textContent = `${title} | ${examType || 'Final'} | ${pageLimit || 'Unlimited'}`
 }
 
@@ -144,7 +144,7 @@ function setHeaderCollapsed(collapsed) {
     headerSummary.style.display = 'none'
   }
   if (toggleHeaderBtn) {
-    toggleHeaderBtn.textContent = collapsed ? '展开' : '收起'
+    toggleHeaderBtn.textContent = collapsed ? 'Expand' : 'Collapse'
   }
   buildHeaderSummary()
 }
@@ -164,7 +164,7 @@ async function handleResetKnowledgeBase() {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      const msg = errorData.detail?.message || errorData.detail || '重置失败'
+      const msg = errorData.detail?.message || errorData.detail || 'Reset failed'
       throw new Error(msg)
     }
 
@@ -174,9 +174,9 @@ async function handleResetKnowledgeBase() {
     persistChunkCount()
     setHeaderCollapsed(false) // 清空后自动展开表单，便于重新填写
     window.alert('Knowledge base cleared!')
-    console.log('重置结果', data)
+    console.log('Reset result', data)
   } catch (error) {
-    console.error('重置失败:', error)
+    console.error('Reset failed:', error)
   } finally {
     btnReset.disabled = false
   }
@@ -231,10 +231,10 @@ async function scrapePageContent() {
         url: tab.url
       }
     } else {
-      throw new Error(response?.error || '无法获取页面内容')
+      throw new Error(response?.error || 'Failed to get page content')
     }
   } catch (error) {
-    console.error('抓取页面内容失败:', error)
+    console.error('Failed to scrape page content:', error)
     throw error
   }
 }
@@ -312,7 +312,7 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
           } else if (!expectTopics) {
             return data.result
           } else {
-            throw new Error('分析结果缺少 topics 字段')
+            throw new Error('Analysis result missing topics field')
           }
         } else if (data.result.data) {
           if (expectTopics && data.result.data.topics) {
@@ -320,17 +320,17 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
           } else if (!expectTopics) {
             return data.result
           } else {
-            throw new Error('分析结果缺少 topics 字段')
+            throw new Error('Analysis result missing topics field')
           }
         } else if (!expectTopics && data.result) {
           return data.result
         } else if (data.result.error) {
           throw new Error(data.result.error)
         } else {
-          throw new Error('任务完成但结果格式异常')
+          throw new Error('Task completed but result format is abnormal')
         }
       } else if (data.status === 'not_found' || data.error) {
-        throw new Error(data.error || '任务未找到')
+        throw new Error(data.error || 'Task not found')
       }
       
       attempts++
@@ -340,12 +340,12 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
         attempts++
         continue
       }
-      console.error('轮询任务状态失败:', error)
+      console.error('Failed to poll task status:', error)
       throw error
     }
   }
   
-  throw new Error('任务处理超时（超过2分钟），请重试')
+  throw new Error('Task processing timeout (over 2 minutes), please retry')
 }
 
 // ========== 数据收集功能 ==========
@@ -359,7 +359,7 @@ async function handleScanPage() {
     const { text, title, url } = await scrapePageContent()
     
     if (!text || text.trim().length === 0) {
-      throw new Error('页面内容为空，无法保存')
+      throw new Error('Page content is empty, cannot save')
     }
 
     const headers = await getHeaders()
@@ -376,7 +376,7 @@ async function handleScanPage() {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || '保存失败')
+      throw new Error(errorData.detail || 'Save failed')
     }
 
     const data = await response.json()
@@ -389,10 +389,10 @@ async function handleScanPage() {
       setIngestButtonState(btnScanPage, 'success', '✅ Saved!')
       setTimeout(() => setIngestButtonState(btnScanPage, 'idle', 'Scan & Add to KB'), 2000)
     } else {
-      throw new Error('保存失败')
+      throw new Error('Save failed')
     }
   } catch (error) {
-    console.error('扫描失败:', error)
+    console.error('Scan failed:', error)
   } finally {
     if (btnScanPage) {
       btnScanPage.disabled = false
@@ -406,7 +406,7 @@ async function handleSaveText() {
   const text = textInput.value.trim()
   
   if (!text) {
-    window.alert('❌ 请输入文本内容')
+    window.alert('❌ Please enter text content')
     return
   }
 
@@ -428,7 +428,7 @@ async function handleSaveText() {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || '保存失败')
+      throw new Error(errorData.detail || 'Save failed')
     }
 
     const data = await response.json()
@@ -442,10 +442,10 @@ async function handleSaveText() {
       setIngestButtonState(btnSaveText, 'success', '✅ Saved!')
       setTimeout(() => setIngestButtonState(btnSaveText, 'idle', 'Save & Add to KB'), 2000)
     } else {
-      throw new Error('保存失败')
+      throw new Error('Save failed')
     }
   } catch (error) {
-    console.error('保存失败:', error)
+    console.error('Save failed:', error)
   } finally {
     btnSaveText.disabled = false
   }
@@ -457,12 +457,12 @@ async function handleUploadPdf() {
   const file = fileInput.files[0]
   
   if (!file) {
-    window.alert('❌ 请选择PDF文件')
+    window.alert('❌ Please select a PDF file')
     return
   }
 
   if (!file.name.toLowerCase().endsWith('.pdf')) {
-    window.alert('❌ 仅支持PDF文件格式')
+    window.alert('❌ Only PDF file format is supported')
     return
   }
 
@@ -482,7 +482,7 @@ async function handleUploadPdf() {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || '上传失败')
+      throw new Error(errorData.detail || 'Upload failed')
     }
 
     const data = await response.json()
@@ -496,10 +496,10 @@ async function handleUploadPdf() {
       setIngestButtonState(btnUploadPdf, 'success', '✅ Saved!')
       setTimeout(() => setIngestButtonState(btnUploadPdf, 'idle', 'Upload PDF & Add to KB'), 2000)
     } else {
-      throw new Error('上传失败')
+      throw new Error('Upload failed')
     }
   } catch (error) {
-    console.error('上传失败:', error)
+    console.error('Upload failed:', error)
   } finally {
     btnUploadPdf.disabled = false
   }
@@ -542,15 +542,15 @@ async function handleNextGenerate() {
     const taskId = taskData.task_id
     
     if (!taskId) {
-      throw new Error('未收到任务ID，请重试')
+      throw new Error('No task ID received, please retry')
     }
     
     // 轮询任务状态
     const result = await pollTaskStatus(taskId)
     
-    console.log('分析结果:', result)
+    console.log('Analysis result:', result)
     if (!result || !result.topics) {
-      throw new Error('分析结果格式异常：缺少 topics 字段')
+      throw new Error('Analysis result format error: missing topics field')
     }
     
     // 保存分析结果
@@ -565,14 +565,14 @@ async function handleNextGenerate() {
     btnNextGenerate.textContent = 'Next: Generate Outline'
     
   } catch (error) {
-    console.error('生成失败:', error)
+    console.error('Generation failed:', error)
     // 错误时总是重置按钮状态，允许用户重试
     if (btnNextGenerate) {
       btnNextGenerate.disabled = false
       btnNextGenerate.textContent = 'Next: Generate Outline'
     }
     // 显示错误提示（可选）
-    window.alert(`生成大纲失败: ${error.message}`)
+    window.alert(`Failed to generate outline: ${error.message}`)
   } finally {
     // 如果当前仍在form视图（说明没有成功切换到outline），确保按钮可用
     if (viewForm.style.display !== 'none' && btnNextGenerate) {
@@ -600,7 +600,7 @@ function renderExtendedTopics() {
   outlineList.innerHTML = ''
   
   if (extendedTopics.length === 0) {
-    outlineList.innerHTML = '<p style="color: #999; text-align: center;">未检测到主题</p>'
+    outlineList.innerHTML = '<p style="color: #999; text-align: center;">No topics detected</p>'
     return
   }
   
@@ -619,12 +619,12 @@ function renderExtendedTopics() {
     label.htmlFor = `topic-${index}`
     
     if (!topic.isCustom) {
-      label.textContent = `${topic.title} (相关性: ${(topic.relevance_score * 100).toFixed(0)}%)`
+      label.textContent = `${topic.title} (Relevance: ${(topic.relevance_score * 100).toFixed(0)}%)`
     } else {
       label.appendChild(document.createTextNode(topic.title))
       const customTag = document.createElement('span')
       customTag.className = 'topic-custom-tag'
-      customTag.textContent = '自定义'
+      customTag.textContent = 'Custom'
       label.appendChild(customTag)
     }
     
@@ -735,7 +735,7 @@ async function handleConfirmGenerate() {
     const selectedTopics = collectSelectedTopics()
     
     if (selectedTopics.length === 0) {
-      throw new Error('请至少选择一个主题')
+      throw new Error('Please select at least one topic')
     }
 
     const headers = await getHeaders()
@@ -762,14 +762,14 @@ async function handleConfirmGenerate() {
     const taskId = taskData.task_id
     
     if (!taskId) {
-      throw new Error('未收到任务ID，请重试')
+      throw new Error('No task ID received, please retry')
     }
     
     const result = await pollTaskStatus(taskId, 120, 3000, false)
     
-    console.log('生成结果:', result)
-    console.log('生成结果类型:', typeof result)
-    console.log('生成结果键:', result ? Object.keys(result) : 'null')
+    console.log('Generation result:', result)
+    console.log('Generation result type:', typeof result)
+    console.log('Generation result keys:', result ? Object.keys(result) : 'null')
     
     // 提取 project_id：可能在不同的位置
     let projectId = null
@@ -779,13 +779,13 @@ async function handleConfirmGenerate() {
                   result.data?.project_id || 
                   (result.data && result.data.project_id)
       
-      console.log('提取的 project_id:', projectId)
+      console.log('Extracted project_id:', projectId)
     }
     
     if (!projectId) {
-      // 如果仍然没有找到，记录详细错误信息
-      console.error('无法找到 project_id，完整结果:', JSON.stringify(result, null, 2))
-      throw new Error('生成结果格式异常：未找到 project_id。请查看控制台获取详细信息。')
+      // If still not found, log detailed error information
+      console.error('Unable to find project_id, full result:', JSON.stringify(result, null, 2))
+      throw new Error('Generation result format error: project_id not found. Please check console for details.')
     }
     
     currentProjectId = projectId
@@ -793,7 +793,7 @@ async function handleConfirmGenerate() {
     // 调用 PDF 下载接口
     // 更新按钮状态显示正在下载PDF
     if (btnConfirmGenerate) {
-      btnConfirmGenerate.textContent = '正在生成 PDF...'
+      btnConfirmGenerate.textContent = 'Generating PDF...'
     }
     const pdfHeaders = await getHeaders()
     const pdfResponse = await fetch(
@@ -806,7 +806,7 @@ async function handleConfirmGenerate() {
 
     if (!pdfResponse.ok) {
       const errorData = await pdfResponse.json().catch(() => ({}))
-      throw new Error(errorData.detail || `PDF 生成失败: ${pdfResponse.status}`)
+      throw new Error(errorData.detail || `PDF generation failed: ${pdfResponse.status}`)
     }
 
     const pdfBlob = await pdfResponse.blob()
@@ -814,15 +814,15 @@ async function handleConfirmGenerate() {
     
     // 确保元素存在
     if (!downloadLink) {
-      throw new Error('无法找到下载链接元素')
+      throw new Error('Cannot find download link element')
     }
     if (!resultArea) {
-      throw new Error('无法找到结果区域元素')
+      throw new Error('Cannot find result area element')
     }
     
     downloadLink.href = pdfUrl
     downloadLink.download = `cheat-sheet-${currentProjectId}.pdf`
-    downloadLink.textContent = '下载生成的 Cheat Sheet (PDF)'
+    downloadLink.textContent = 'Download Generated Cheat Sheet (PDF)'
     
     // 成功：清掉计时器，关闭大纲页，展示结果区
     if (contentTimerId) {
@@ -838,16 +838,16 @@ async function handleConfirmGenerate() {
     // 显示结果区域
     resultArea.style.display = 'block'
     
-    console.log('✅ PDF生成成功，已显示结果区域')
+    console.log('✅ PDF generated successfully, result area displayed')
     
   } catch (error) {
-    console.error('生成失败:', error)
+    console.error('Generation failed:', error)
     // 显示错误信息给用户
-    window.alert(`生成失败: ${error.message || error.toString()}`)
+    window.alert(`Generation failed: ${error.message || error.toString()}`)
     // 确保按钮状态被重置
     if (btnConfirmGenerate) {
       btnConfirmGenerate.disabled = false
-      btnConfirmGenerate.textContent = '确认并生成'
+      btnConfirmGenerate.textContent = 'Submit'
     }
     // 确保计时器被清除
     if (contentTimerId) {
@@ -867,7 +867,7 @@ async function handleConfirmGenerate() {
     }
     if (resultArea.style.display !== 'block') {
       btnConfirmGenerate.disabled = false
-      btnConfirmGenerate.textContent = '确认并生成'
+      btnConfirmGenerate.textContent = 'Submit'
     }
   }
 }

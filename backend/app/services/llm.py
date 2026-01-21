@@ -134,46 +134,51 @@ def generate_outline(text: str, context: Optional[str] = None, exam_type: ExamTy
     cleaned_text = clean_raw_text(text)
     cleaned_context = clean_raw_text(context) if context else None
     
-    # 根据考试类型动态调整数量约束
+    # 1. 定义明确的数字边界 (Hard Limits)
     if exam_type == ExamType.quiz:
-        topic_range = "3-5"
-        topic_instruction = "Extract exactly 3-5 core topics. Focus on specific, narrow concepts."
+        min_t, max_t = 3, 5
+        scope_desc = "Specific, narrow concepts suitable for a short quiz."
     elif exam_type == ExamType.midterm:
-        topic_range = "5-8"
-        topic_instruction = "Extract 5-8 core topics. Cover the first half of the course material."
+        min_t, max_t = 5, 8
+        scope_desc = "Core concepts covering the first half of the course."
     else:  # final
-        topic_range = "8-15"
-        topic_instruction = "Extract 8-15 core topics. Ensure comprehensive coverage of the entire course."
+        min_t, max_t = 8, 15
+        scope_desc = "Comprehensive coverage of the entire course material."
     
-    system_prompt = f"""你是一个专业的复习资料分析助手。你的主要任务是分析用户提供的对话记录，提取出 {topic_range} 个核心考试主题。
+    # 2. 构建更强硬的 System Prompt
+    system_prompt = f"""You are a strict Exam Syllabus Analyzer. Your task is to extract exam topics from the provided text.
 
-        【任务：提取核心主题】
-        1. 忽略闲聊内容，只关注与学习、考试、知识点相关的主题。
-        2. 每个主题应该是一个大块的知识点，包含与之相关的多方面的内容，例如公式、定理、例题、证明等。
-        3. 为每个主题计算相关性分数 (0.0-1.0)，基于其在对话中出现的频率和重要性。
-        4. 按相关性从高到低排序。
-        5. {topic_instruction}
+        GLOBAL CONSTRAINTS:
+        1. **Relevance**: Ignore chitchat. Focus ONLY on academic concepts, formulas, theorems, and proofs.
+        2. **Scoring**: Assign a relevance_score (0.0-1.0) to each topic based on frequency and importance.
+        3. **Sorting**: Sort topics by relevance_score descending.
 
-        【输出格式要求】
-        必须返回符合以下结构的纯 JSON，不要包含 Markdown 标记：
+        STRICT QUANTITY CONTROL (CRITICAL):
+        You MUST output a JSON list containing **between {min_t} and {max_t} topics**.
+        
+        **STRATEGY TO MEET QUOTA:**
+        - **IF you find > {max_t} topics**: You MUST **MERGE** specific sub-topics into broader "Parent Topics". (e.g., merge "Dot Product" and "Cross Product" into "Vector Operations").
+        - **IF you find < {min_t} topics**: You MUST **SPLIT** broad topics into specific sub-components.
+        - **VIOLATION**: Returning more than {max_t} or fewer than {min_t} topics is considered a SYSTEM FAILURE.
+
+        SCOPE: {scope_desc}
+
+        【OUTPUT FORMAT】
+        Return ONLY raw JSON. No Markdown. No comments.
+        Structure:
         {{
-        "topics": [
-            {{"title": "主题A", "relevance_score": 0.95}},
-            {{"title": "主题B", "relevance_score": 0.88}}
-        ]
+            "topics": [
+                {{"title": "Broad Concept A", "relevance_score": 0.95}},
+                {{"title": "Broad Concept B", "relevance_score": 0.88}}
+            ]
         }}
 
-        IMPORTANT: 
-        1. JSON String Escaping: Double-escape all backslashes in LaTeX (e.g., \\\\sigma).
-        2. Constraint Check: Ensure the "topics" list has between {topic_range} items. Do not output too many small topics.
+        IMPORTANT: Double-escape backslashes in LaTeX strings (e.g., \\\\sigma).
         """
 
     user_input = f"对话记录：\n{cleaned_text}\n\n"
     if cleaned_context:
         user_input += f"用户背景信息：\n{cleaned_context}\n\n"
-    
-    # 再次在 User Input 结尾强调一次，防止模型"忘事"
-    user_input += f"请提取 {topic_range} 个核心主题。"
 
     print(f"----- [DEBUG] Calling generate_outline with text length: {len(cleaned_text)} -----")
 

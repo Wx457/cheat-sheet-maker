@@ -184,13 +184,13 @@
       border-radius: 4px;
       cursor: pointer;
       font-weight: 600;
-      background-color: rgba(10, 186, 181, 0.3); /* 蒂芙尼蓝 30% 透明度 */
+      background-color: rgba(10, 186, 181, 0.3);
       color: white;
       transition: background-color 0.2s, opacity 0.2s;
     }
 
     .tab-content button:hover {
-      background-color: rgba(10, 186, 181, 1); /* 蒂芙尼蓝 100% 不透明 */
+      background-color: rgba(10, 186, 181, 1);
     }
 
     .tab-content button:disabled {
@@ -251,7 +251,7 @@
       cursor: pointer;
       font-weight: 600;
       font-size: 13px;
-      background-color: rgba(10, 186, 181, 0.3); /* 蒂芙尼蓝 30% 透明度 */
+      background-color: rgba(10, 186, 181, 0.3); 
       color: white;
       transition: background-color 0.2s, opacity 0.2s;
       white-space: nowrap;
@@ -404,12 +404,12 @@
       border-radius: 4px;
       cursor: pointer;
       font-weight: 600;
-      background-color: rgba(10, 186, 181, 0.3); /* 蒂芙尼蓝 30% 透明度 */
+      background-color: rgba(10, 186, 181, 0.3);
       color: white;
       transition: background-color 0.2s, opacity 0.2s;
     }
     .primary-btn:hover {
-      background-color: rgba(10, 186, 181, 1); /* 蒂芙尼蓝 100% 不透明 */
+      background-color: rgba(10, 186, 181, 1);
     }
 
     #resultArea {
@@ -422,7 +422,7 @@
     #resultArea a {
       display: inline-block;
       padding: 10px 20px;
-      background-color: #0ABAB5; /* 100%饱和的Tiffany蓝背景 */
+      background-color: #0ABAB5;
       color: white; /* 白色文字 */
       text-decoration: none;
       font-weight: bold;
@@ -539,33 +539,33 @@
     <div class="main-content">
       <!-- 可折叠基础信息 Header -->
       <div class="header-accordion" id="headerAccordion">
-        <button id="toggleHeaderBtn" class="header-toggle-btn" type="button">收起</button>
+        <button id="toggleHeaderBtn" class="header-toggle-btn" type="button">Collapse</button>
         <div class="header-summary" id="headerSummary">
           <div class="header-summary-main" id="headerSummaryMain">
-            课程未填写 · Final · Unlimited
+            Course Name not filled · Final · Unlimited
           </div>
-          <div class="header-summary-edit" id="headerSummaryEdit">展开</div>
+          <div class="header-summary-edit" id="headerSummaryEdit">Expand</div>
         </div>
         <div class="header-details" id="headerDetails">
           <div class="form-group">
-            <label class="section-title" for="courseName">课程名称</label>
-            <input type="text" id="courseName" placeholder="例如: Machine Learning CS229" />
+            <label class="section-title" for="courseName">Course Name</label>
+            <input type="text" id="courseName" placeholder="e.g. Machine Learning CS229" />
           </div>
 
           <div class="form-group">
-            <label class="section-title">学习层次</label>
+            <label class="section-title">Education Level</label>
             <div class="radio-group">
               <label class="radio-label">
-                <input type="radio" name="educationLevel" value="Undergraduate" checked> 本科
+                <input type="radio" name="educationLevel" value="Undergraduate" checked> Undergraduate
               </label>
               <label class="radio-label">
-                <input type="radio" name="educationLevel" value="Graduate"> 研究生
+                <input type="radio" name="educationLevel" value="Graduate"> Graduate
               </label>
             </div>
           </div>
 
           <div class="form-group">
-            <label class="section-title">考试类型</label>
+            <label class="section-title">Exam Type</label>
             <div class="radio-group">
               <label class="radio-label">
                 <input type="radio" name="examType" value="Quiz"> Quiz
@@ -580,7 +580,7 @@
           </div>
 
           <div class="form-group">
-            <label class="section-title">小抄页面限制</label>
+            <label class="section-title">Page Limit</label>
             <div class="radio-group">
               <label class="radio-label"><input type="radio" name="pageLimit" value="1 side"> 1 Side</label>
               <label class="radio-label"><input type="radio" name="pageLimit" value="1 page"> 1 Page</label>
@@ -590,23 +590,23 @@
           </div>
 
           <div class="form-group">
-            <label class="section-title" for="syllabusInput">考试大纲(可选)</label>
-            <textarea id="syllabusInput" rows="3" placeholder="在此粘贴考纲，AI 将优先提取相关内容..."></textarea>
+            <label class="section-title" for="syllabusInput">Syllabus (Optional)</label>
+            <textarea id="syllabusInput" rows="3" placeholder="Paste syllabus here, AI will prioritize extracting relevant content..."></textarea>
           </div>
         </div>
       </div>
 
       <!-- 标签页 -->
       <div class="tabs">
-        <button class="tab active" data-tab="current-page">扫描当前页面</button>
-        <button class="tab" data-tab="paste-text">粘贴文本</button>
-        <button class="tab" data-tab="upload-pdf">上传PDF</button>
+        <button class="tab active" data-tab="current-page">Scan</button>
+        <button class="tab" data-tab="paste-text">Paste</button>
+        <button class="tab" data-tab="upload-pdf">PDF</button>
       </div>
 
       <!-- 标签页内容：当前页面 -->
       <div id="tab-current-page" class="tab-content active">
         <p style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">
-          捕获当前浏览器标签页中的主要文本内容，并保存到知识库。
+          Capture the main text content of the current browser tab and save it to the knowledge base.
         </p>
         <button id="btnScanPage">Scan &amp; Add to KB</button>
       </div>
@@ -614,8 +614,8 @@
       <!-- 标签页内容：粘贴文本 -->
       <div id="tab-paste-text" class="tab-content">
         <div class="form-group">
-          <label class="section-title" for="pasteTextInput">粘贴文本内容</label>
-          <textarea id="pasteTextInput" rows="8" placeholder="在此粘贴文本内容..."></textarea>
+          <label class="section-title" for="pasteTextInput">Paste Text</label>
+          <textarea id="pasteTextInput" rows="8" placeholder="Paste text content here..."></textarea>
         </div>
         <button id="btnSaveText">Save &amp; Add to KB</button>
       </div>
@@ -623,7 +623,7 @@
       <!-- 标签页内容：上传PDF -->
       <div id="tab-upload-pdf" class="tab-content">
         <div class="form-group">
-          <label class="section-title" for="pdfFileInput">选择PDF文件</label>
+          <label class="section-title" for="pdfFileInput">Select PDF File</label>
           <div class="file-input-wrapper">
             <input type="file" id="pdfFileInput" accept=".pdf" />
           </div>
@@ -635,7 +635,7 @@
     <!-- 底部固定栏 -->
     <div class="footer">
       <div class="footer-left">
-        <button id="btnReset" class="reset-btn" title="清空当前用户的知识库">🗑 清空</button>
+        <button id="btnReset" class="reset-btn" title="Clear the knowledge base for the current user">🗑 Clear</button>
         <div id="chunkCounter" class="counter-bar">📚 0 Chunks</div>
       </div>
       <div class="footer-right">
@@ -648,7 +648,7 @@
   <!-- 大纲视图 -->
   <div id="view-outline">
     <div class="main-content">
-      <h4>检测到的考试主题 (请勾选)</h4>
+      <h4>Detected Exam Topics (Please Check)</h4>
       <div id="outline-list"></div>
       
       <!-- 自定义主题输入 -->
@@ -657,7 +657,7 @@
           <input 
             type="text" 
             id="customTopicInput" 
-            placeholder="添加自定义主题..." 
+            placeholder="Add topic..." 
             style="flex: 1; padding: 8px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box;"
           />
           <button 
@@ -670,15 +670,15 @@
       </div>
       
       <div class="button-group">
-        <button id="btnBack" class="secondary-btn">返回修改</button>
-        <button id="btnConfirmGenerate" class="primary-btn">确认并生成</button>
+        <button id="btnBack" class="secondary-btn">Back</button>
+        <button id="btnConfirmGenerate" class="primary-btn">Submit</button>
       </div>
       <div id="outlineEstimateLabel" class="estimate-badge" style="text-align: right; margin-top: 6px;"></div>
     </div>
   </div>
 
   <div id="resultArea" style="display:none; padding: 16px;">
-    <a id="downloadLink" href="#" target="_blank">查看生成的 PDF</a>
+    <a id="downloadLink" href="#" target="_blank">Download PDF</a>
   </div>
 
   <script src="popup.js"></script>

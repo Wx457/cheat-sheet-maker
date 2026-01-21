@@ -11,13 +11,13 @@ async function scrollAndCollect() {
   const scrollableDiv = document.querySelector('[data-scroll-root="true"]');
 
   if (!scrollableDiv) {
-    console.error("依然未找到 data-scroll-root 容器，无法自动滚动！");
+    console.error("Still cannot find data-scroll-root container, unable to auto-scroll!");
     // 如果找不到，只能兜底抓当前屏幕
     return extractCurrentView();
   }
 
-  console.log("找到滚动容器:", scrollableDiv);
-  console.log("开始流式抓取...");
+  console.log("Found scroll container:", scrollableDiv);
+  console.log("Starting stream capture...");
 
   // 用于存储抓取到的所有文本，使用 Set 防止重复
   let uniqueTexts = new Set();
@@ -51,18 +51,18 @@ async function scrollAndCollect() {
     const isAtBottom = Math.ceil(scrollableDiv.scrollTop + scrollableDiv.clientHeight) >= scrollableDiv.scrollHeight - 50;
     
     if (isAtBottom) {
-      console.log("已到达页面底部");
+      console.log("Reached page bottom");
       break;
     }
     
     // 防死循环检测：位置没变说明卡住了
     if (Math.abs(scrollableDiv.scrollTop - lastScrollTop) < 5 && lastScrollTop !== -1) {
-        console.warn("滚动条位置未变化，尝试强制滚动...");
+        console.warn("Scroll position unchanged, attempting forced scroll...");
         // 尝试一次大跳跃，如果还不行就退出
         scrollableDiv.scrollBy({ top: step, behavior: "instant" });
         await sleep(500);
         if (Math.abs(scrollableDiv.scrollTop - lastScrollTop) < 5) {
-             console.log("滚动条彻底卡住，结束抓取");
+             console.log("Scroll completely stuck, ending capture");
              break;
         }
     }
@@ -84,10 +84,10 @@ async function scrollAndCollect() {
 
   // 格式化输出
   let combinedText = orderedContent.map((text, index) => {
-      return `=== 对话片段 ${index + 1} ===\n\n${text}`;
+      return `=== Conversation Fragment ${index + 1} ===\n\n${text}`;
   }).join("\n\n");
 
-  console.log(`抓取完成，共收集 ${orderedContent.length} 个片段`);
+  console.log(`Capture completed, collected ${orderedContent.length} fragments`);
   
   return {
     title: finalTitle,
@@ -100,7 +100,7 @@ function extractCurrentView() {
     const divs = document.querySelectorAll('.markdown');
     let text = "";
     divs.forEach((div, i) => {
-        text += `=== 片段 ${i+1} ===\n${div.innerText.trim()}\n\n`;
+        text += `=== Fragment ${i+1} ===\n${div.innerText.trim()}\n\n`;
     });
     return {
         title: document.title,
@@ -115,11 +115,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       try {
         const data = await scrollAndCollect();
         if (!data.text || data.text.length < 5) {
-             throw new Error("抓取内容为空");
+             throw new Error("Captured content is empty");
         }
         sendResponse({ success: true, text: data.text, title: data.title });
       } catch (error) {
-        console.error("抓取流程出错:", error);
+        console.error("Capture process error:", error);
         sendResponse({ success: false, error: error.message });
       }
     })();
