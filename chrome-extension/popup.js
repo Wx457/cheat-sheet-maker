@@ -54,7 +54,6 @@ async function getHeadersForFile() {
 // 获取页面元素
 const viewForm = document.getElementById('view-form')
 const viewOutline = document.getElementById('view-outline')
-const statusBar = document.getElementById('statusBar')
 const outlineList = document.getElementById('outline-list')
 const resultArea = document.getElementById('resultArea')
 const downloadLink = document.getElementById('downloadLink')
@@ -62,6 +61,12 @@ const customTopicInput = document.getElementById('customTopicInput')
 const btnAddCustomTopic = document.getElementById('btnAddCustomTopic')
 const chunkCounter = document.getElementById('chunkCounter')
 const btnReset = document.getElementById('btnReset')
+const estimateLabel = document.getElementById('estimateLabel')
+const headerAccordion = document.getElementById('headerAccordion')
+const headerSummary = document.getElementById('headerSummary')
+const headerSummaryMain = document.getElementById('headerSummaryMain')
+const headerDetails = document.getElementById('headerDetails')
+const toggleHeaderBtn = document.getElementById('toggleHeaderBtn')
 
 // 按钮元素
 const btnScanPage = document.getElementById('btnScanPage')
@@ -70,33 +75,86 @@ const btnUploadPdf = document.getElementById('btnUploadPdf')
 const btnNextGenerate = document.getElementById('btnNextGenerate')
 const btnBack = document.getElementById('btnBack')
 const btnConfirmGenerate = document.getElementById('btnConfirmGenerate')
+const outlineEstimateLabel = document.getElementById('outlineEstimateLabel')
 
 // 标签页元素
 const tabs = document.querySelectorAll('.tab')
 const tabContents = document.querySelectorAll('.tab-content')
 
-// 显示状态消息
-function showStatusBar(message, type = '') {
-  statusBar.textContent = message
-  statusBar.className = `status-bar ${type}`
+// Step2（Confirm & Generate）计时
+let contentTimerId = null
+let contentElapsed = 0
+
+// 采集按钮状态
+function setIngestButtonState(button, state, label) {
+  if (!button) return
+  if (label) {
+    button.textContent = label
+  }
+  if (state === 'loading') {
+    button.disabled = true
+  } else if (state === 'success') {
+    button.disabled = true
+  } else {
+    button.disabled = false
+  }
 }
 
-function clearStatusBar() {
-  statusBar.textContent = ''
-  statusBar.className = 'status-bar'
+function autoCollapseHeaderIfNeeded() {
+  if (chunkCount > 0 && !headerCollapsed) {
+    setHeaderCollapsed(true)
+  }
 }
 
 function updateChunkCounter() {
   if (chunkCounter) {
-    chunkCounter.textContent = `已保存 ${chunkCount} 个切片`
+    chunkCounter.textContent = `📚 ${chunkCount} Chunks`
   }
+}
+
+function persistChunkCount() {
+  try {
+    chrome.storage.local.set({ chunk_count: chunkCount })
+  } catch (e) {
+    console.error('保存 chunk_count 失败', e)
+  }
+}
+
+// Header 折叠与摘要
+let headerCollapsed = false
+
+function buildHeaderSummary() {
+  if (!headerSummaryMain) return
+  const { courseName, examType, pageLimit } = collectFormData()
+  const title = courseName || '课程未填写'
+  headerSummaryMain.textContent = `${title} | ${examType || 'Final'} | ${pageLimit || 'Unlimited'}`
+}
+
+function setHeaderCollapsed(collapsed) {
+  headerCollapsed = collapsed
+  if (!headerAccordion || !headerDetails || !headerSummary) return
+
+  if (collapsed) {
+    headerAccordion.classList.add('collapsed')
+    headerDetails.classList.add('collapsed')
+    headerSummary.style.display = 'flex'
+  } else {
+    headerAccordion.classList.remove('collapsed')
+    headerDetails.classList.remove('collapsed')
+    headerSummary.style.display = 'none'
+  }
+  if (toggleHeaderBtn) {
+    toggleHeaderBtn.textContent = collapsed ? '展开' : '收起'
+  }
+  buildHeaderSummary()
 }
 
 // 知识库重置
 async function handleResetKnowledgeBase() {
   if (!btnReset) return
+  const confirmed = window.confirm('Are you sure you want to clear the entire knowledge base? This cannot be undone.')
+  if (!confirmed) return
   btnReset.disabled = true
-  showStatusBar('正在清空知识库...', 'loading')
   try {
     const headers = await getHeaders()
     const response = await fetch('http://127.0.0.1:8000/api/plugin/reset', {
@@ -113,11 +171,11 @@ async function handleResetKnowledgeBase() {
     const data = await response.json()
     chunkCount = 0
     updateChunkCounter()
-    showStatusBar('Knowledge base cleared! 已清空知识库', 'success')
-    setTimeout(clearStatusBar, 3000)
+    persistChunkCount()
+    setHeaderCollapsed(false) // 清空后自动展开表单，便于重新填写
+    window.alert('Knowledge base cleared!')
     console.log('重置结果', data)
   } catch (error) {
-    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('重置失败:', error)
   } finally {
     btnReset.disabled = false
@@ -294,8 +352,8 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
 
 // 1. 扫描当前页面并保存
 async function handleScanPage() {
-  btnScanPage.disabled = true
-  showStatusBar('正在扫描页面...', 'loading')
+  if (!btnScanPage) return
+  setIngestButtonState(btnScanPage, 'loading', 'Scanning...')
 
   try {
     const { text, title, url } = await scrapePageContent()
@@ -324,18 +382,21 @@ async function handleScanPage() {
     const data = await response.json()
     
     if (data.status === 'success') {
-      showStatusBar(`✅ 页面已扫描！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
       chunkCount += Number(data.chunks_count || 0)
       updateChunkCounter()
-      setTimeout(clearStatusBar, 3000)
+      persistChunkCount()
+      autoCollapseHeaderIfNeeded()
+      setIngestButtonState(btnScanPage, 'success', '✅ Saved!')
+      setTimeout(() => setIngestButtonState(btnScanPage, 'idle', 'Scan & Add to KB'), 2000)
     } else {
       throw new Error('保存失败')
     }
   } catch (error) {
-    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('扫描失败:', error)
   } finally {
-    btnScanPage.disabled = false
+    if (btnScanPage) {
+      btnScanPage.disabled = false
+    }
   }
 }
 
@@ -345,12 +406,12 @@ async function handleSaveText() {
   const text = textInput.value.trim()
   
   if (!text) {
-    showStatusBar('❌ 请输入文本内容', 'error')
+    window.alert('❌ 请输入文本内容')
     return
   }
 
   btnSaveText.disabled = true
-  showStatusBar('正在保存文本...', 'loading')
+  setIngestButtonState(btnSaveText, 'loading', 'Saving...')
 
   try {
     const headers = await getHeaders()
@@ -373,16 +434,17 @@ async function handleSaveText() {
     const data = await response.json()
     
     if (data.status === 'success') {
-      showStatusBar(`✅ 文本已保存！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
       chunkCount += Number(data.chunks_count || 0)
       updateChunkCounter()
+      persistChunkCount()
+      autoCollapseHeaderIfNeeded()
       textInput.value = '' // 清空输入框
-      setTimeout(clearStatusBar, 3000)
+      setIngestButtonState(btnSaveText, 'success', '✅ Saved!')
+      setTimeout(() => setIngestButtonState(btnSaveText, 'idle', 'Save & Add to KB'), 2000)
     } else {
       throw new Error('保存失败')
     }
   } catch (error) {
-    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('保存失败:', error)
   } finally {
     btnSaveText.disabled = false
@@ -395,17 +457,17 @@ async function handleUploadPdf() {
   const file = fileInput.files[0]
   
   if (!file) {
-    showStatusBar('❌ 请选择PDF文件', 'error')
+    window.alert('❌ 请选择PDF文件')
     return
   }
 
   if (!file.name.toLowerCase().endsWith('.pdf')) {
-    showStatusBar('❌ 仅支持PDF文件格式', 'error')
+    window.alert('❌ 仅支持PDF文件格式')
     return
   }
 
   btnUploadPdf.disabled = true
-  showStatusBar('正在上传PDF...', 'loading')
+  setIngestButtonState(btnUploadPdf, 'loading', 'Uploading...')
 
   try {
     const headers = await getHeadersForFile()
@@ -426,16 +488,17 @@ async function handleUploadPdf() {
     const data = await response.json()
     
     if (data.status === 'success') {
-      showStatusBar(`✅ PDF已上传！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
       chunkCount += Number(data.chunks_count || 0)
       updateChunkCounter()
+      persistChunkCount()
+      autoCollapseHeaderIfNeeded()
       fileInput.value = '' // 清空文件选择
-      setTimeout(clearStatusBar, 3000)
+      setIngestButtonState(btnUploadPdf, 'success', '✅ Saved!')
+      setTimeout(() => setIngestButtonState(btnUploadPdf, 'idle', 'Upload PDF & Add to KB'), 2000)
     } else {
       throw new Error('上传失败')
     }
   } catch (error) {
-    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('上传失败:', error)
   } finally {
     btnUploadPdf.disabled = false
@@ -446,8 +509,11 @@ async function handleUploadPdf() {
 
 // 下一步：生成大纲
 async function handleNextGenerate() {
+  if (!btnNextGenerate) return
   btnNextGenerate.disabled = true
-  showStatusBar('正在生成大纲...', 'loading')
+  btnNextGenerate.textContent = 'Generating Outline...'
+  // Step 1 不需要估时/计时
+  if (estimateLabel) estimateLabel.textContent = ''
 
   try {
     const formData = collectFormData()
@@ -495,13 +561,24 @@ async function handleNextGenerate() {
     
     // 切换到大纲视图
     showView('outline')
-    clearStatusBar()
+    // 进入 Step 2（确认并生成）前，恢复主页面按钮状态，避免下次打开是错误状态
+    btnNextGenerate.textContent = 'Next: Generate Outline'
     
   } catch (error) {
-    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('生成失败:', error)
+    // 错误时总是重置按钮状态，允许用户重试
+    if (btnNextGenerate) {
+      btnNextGenerate.disabled = false
+      btnNextGenerate.textContent = 'Next: Generate Outline'
+    }
+    // 显示错误提示（可选）
+    window.alert(`生成大纲失败: ${error.message}`)
   } finally {
-    btnNextGenerate.disabled = false
+    // 如果当前仍在form视图（说明没有成功切换到outline），确保按钮可用
+    if (viewForm.style.display !== 'none' && btnNextGenerate) {
+      btnNextGenerate.disabled = false
+      btnNextGenerate.textContent = 'Next: Generate Outline'
+    }
   }
 }
 
@@ -615,16 +692,43 @@ function updateAddButtonState() {
 // 处理返回按钮
 function handleBack() {
   showView('form')
-  clearStatusBar()
   if (customTopicInput) {
     customTopicInput.value = ''
   }
+  
+  // CRITICAL: 重置主视图按钮状态，允许用户重新生成outline
+  if (btnNextGenerate) {
+    btnNextGenerate.disabled = false
+    btnNextGenerate.textContent = 'Next: Generate Outline'
+  }
+  
+  // 清除任何错误消息或状态信息
+  if (estimateLabel) {
+    estimateLabel.textContent = ''
+  }
+  
+  // 注意：不重置 currentOutlineData，因为它可能被用于其他目的
+  // 但每次点击 Next 时会重新生成，所以这应该没问题
 }
 
 // 处理确认并生成
 async function handleConfirmGenerate() {
+  if (!btnConfirmGenerate) return
+  // Step 2：智能计时器（重活在这里）
+  const estSeconds = Math.round(15 + (chunkCount * 0.6))
+  if (outlineEstimateLabel) {
+    outlineEstimateLabel.textContent = `Est: ~${estSeconds}s`
+  }
   btnConfirmGenerate.disabled = true
-  showStatusBar('正在生成小抄...', 'loading')
+  contentElapsed = 0
+  btnConfirmGenerate.textContent = 'Generating Content... (0s)'
+  if (contentTimerId) {
+    clearInterval(contentTimerId)
+  }
+  contentTimerId = setInterval(() => {
+    contentElapsed += 1
+    btnConfirmGenerate.textContent = `Generating Content... (${contentElapsed}s)`
+  }, 1000)
 
   try {
     const formData = collectFormData()
@@ -664,22 +768,33 @@ async function handleConfirmGenerate() {
     const result = await pollTaskStatus(taskId, 120, 3000, false)
     
     console.log('生成结果:', result)
+    console.log('生成结果类型:', typeof result)
+    console.log('生成结果键:', result ? Object.keys(result) : 'null')
     
-    if (result && result.project_id) {
-      currentProjectId = result.project_id
-    } else if (result && typeof result === 'object') {
-      const projectId = result.project_id || result.data?.project_id
-      if (projectId) {
-        currentProjectId = projectId
-      }
+    // 提取 project_id：可能在不同的位置
+    let projectId = null
+    if (result && typeof result === 'object') {
+      // 尝试多种可能的位置
+      projectId = result.project_id || 
+                  result.data?.project_id || 
+                  (result.data && result.data.project_id)
+      
+      console.log('提取的 project_id:', projectId)
     }
     
-    if (!currentProjectId) {
-      throw new Error('生成结果格式异常：未找到 project_id')
+    if (!projectId) {
+      // 如果仍然没有找到，记录详细错误信息
+      console.error('无法找到 project_id，完整结果:', JSON.stringify(result, null, 2))
+      throw new Error('生成结果格式异常：未找到 project_id。请查看控制台获取详细信息。')
     }
+    
+    currentProjectId = projectId
 
     // 调用 PDF 下载接口
-    showStatusBar('正在生成 PDF...', 'loading')
+    // 更新按钮状态显示正在下载PDF
+    if (btnConfirmGenerate) {
+      btnConfirmGenerate.textContent = '正在生成 PDF...'
+    }
     const pdfHeaders = await getHeaders()
     const pdfResponse = await fetch(
       `http://127.0.0.1:8000/api/plugin/download-cheat-sheet/${currentProjectId}`,
@@ -697,19 +812,63 @@ async function handleConfirmGenerate() {
     const pdfBlob = await pdfResponse.blob()
     const pdfUrl = URL.createObjectURL(pdfBlob)
     
+    // 确保元素存在
+    if (!downloadLink) {
+      throw new Error('无法找到下载链接元素')
+    }
+    if (!resultArea) {
+      throw new Error('无法找到结果区域元素')
+    }
+    
     downloadLink.href = pdfUrl
     downloadLink.download = `cheat-sheet-${currentProjectId}.pdf`
     downloadLink.textContent = '下载生成的 Cheat Sheet (PDF)'
+    
+    // 成功：清掉计时器，关闭大纲页，展示结果区
+    if (contentTimerId) {
+      clearInterval(contentTimerId)
+      contentTimerId = null
+    }
+    if (outlineEstimateLabel) outlineEstimateLabel.textContent = ''
+    
+    // 隐藏其他视图
+    if (viewOutline) viewOutline.style.display = 'none'
+    if (viewForm) viewForm.style.display = 'none'
+    
+    // 显示结果区域
     resultArea.style.display = 'block'
     
-    showStatusBar('✅ 生成成功！', 'success')
-    showView('form')
+    console.log('✅ PDF生成成功，已显示结果区域')
     
   } catch (error) {
-    showStatusBar(`❌ 错误: ${error.message}`, 'error')
     console.error('生成失败:', error)
+    // 显示错误信息给用户
+    window.alert(`生成失败: ${error.message || error.toString()}`)
+    // 确保按钮状态被重置
+    if (btnConfirmGenerate) {
+      btnConfirmGenerate.disabled = false
+      btnConfirmGenerate.textContent = '确认并生成'
+    }
+    // 确保计时器被清除
+    if (contentTimerId) {
+      clearInterval(contentTimerId)
+      contentTimerId = null
+    }
+    if (outlineEstimateLabel) {
+      outlineEstimateLabel.textContent = ''
+    }
   } finally {
-    btnConfirmGenerate.disabled = false
+    if (contentTimerId) {
+      clearInterval(contentTimerId)
+      contentTimerId = null
+    }
+    if (outlineEstimateLabel && resultArea.style.display !== 'block') {
+      outlineEstimateLabel.textContent = ''
+    }
+    if (resultArea.style.display !== 'block') {
+      btnConfirmGenerate.disabled = false
+      btnConfirmGenerate.textContent = '确认并生成'
+    }
   }
 }
 
@@ -741,4 +900,38 @@ if (btnAddCustomTopic && customTopicInput) {
 
 // 页面加载时初始化
 showView('form')
-updateChunkCounter()
+chrome.storage.local.get(['chunk_count'], (result) => {
+  if (typeof result?.chunk_count === 'number') {
+    chunkCount = result.chunk_count
+  }
+  updateChunkCounter()
+  // 启动时：有已存数据则收起，否则展开
+  setHeaderCollapsed(chunkCount > 0)
+})
+buildHeaderSummary()
+
+// Header Accordion：点击“编辑/摘要”展开
+if (headerSummary) {
+  headerSummary.addEventListener('click', () => {
+    setHeaderCollapsed(false)
+    const input = document.getElementById('courseName')
+    if (input) input.focus()
+  })
+}
+
+if (toggleHeaderBtn) {
+  toggleHeaderBtn.addEventListener('click', () => {
+    setHeaderCollapsed(!headerCollapsed)
+    const input = document.getElementById('courseName')
+    if (!headerCollapsed && input) input.focus()
+  })
+}
+
+// 表单字段变化时，实时更新摘要（即便已折叠）
+const courseNameInput = document.getElementById('courseName')
+if (courseNameInput) {
+  courseNameInput.addEventListener('input', buildHeaderSummary)
+}
+document.querySelectorAll('input[name="examType"], input[name="pageLimit"]').forEach((el) => {
+  el.addEventListener('change', buildHeaderSummary)
+})

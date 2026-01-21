@@ -17,13 +17,6 @@
       height: 600px; /* 固定高度 */
     }
 
-    .toolbar {
-      display: flex;
-      justify-content: flex-end;
-      padding: 8px 12px 0 12px;
-      gap: 8px;
-    }
-
     .reset-btn {
       padding: 6px 10px;
       border: none;
@@ -222,53 +215,65 @@
       font-size: 13px;
     }
 
-    /* 底部固定栏 */
+    /* 底部固定栏（Sticky Footer） */
     .footer {
       border-top: 1px solid #e8eaed;
-      padding: 12px 16px;
+      padding: 10px 16px;
       background-color: #fff;
       display: flex;
-      flex-direction: column;
-      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      position: sticky;
+      bottom: 0;
+      z-index: 20;
     }
 
-    .status-bar {
+    .footer-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       font-size: 12px;
-      color: #5f6368;
-      min-height: 1.2em;
-      text-align: center;
+      color: #4b5563;
     }
 
-    .status-bar.success {
-      color: #065f46;
-    }
-
-    .status-bar.error {
-      color: #991b1b;
+    .footer-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
     }
 
     .footer-button {
-      width: 50%;
-      padding: 12px;
+      padding: 10px 16px;
       border: none;
-      border-radius: 20px;
-      align-self: center;
+      border-radius: 999px;
       cursor: pointer;
       font-weight: 600;
-      font-size: 14px;
+      font-size: 13px;
       background-color: rgba(10, 186, 181, 0.3); /* 蒂芙尼蓝 30% 透明度 */
       color: white;
       transition: background-color 0.2s, opacity 0.2s;
+      white-space: nowrap;
     }
-
+    
     .footer-button:hover {
       background-color: rgba(10, 186, 181, 1); /* 蒂芙尼蓝 100% 不透明 */
     }
-
-    .footer-button:disabled {
+    
+    .footer-button.disabled {
       background-color: #dadce0;
-      color: #999;
+      color: #9ca3af;
       cursor: not-allowed;
+    }
+
+    .footer-button.success {
+      background-color: #16a34a;
+    }
+
+    .estimate-badge {
+      font-size: 11px;
+      color: #6b7280;
     }
 
     /* 大纲视图样式 */
@@ -427,64 +432,168 @@
     #resultArea a:hover {
       opacity: 0.9;
     }
+
+    .toolbar {
+      display: flex;
+      justify-content: flex-end;
+      padding: 8px 12px 0 12px;
+      gap: 8px;
+    }
+
+    .reset-btn {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      background-color: #ef4444;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .reset-btn:hover {
+      background-color: #dc2626;
+    }
+
+    .counter-bar {
+      font-size: 12px;
+      color: #0f172a;
+      min-height: 1.2em;
+    }
+
+    /* Header Accordion */
+    .header-accordion {
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      padding: 8px 10px 10px 10px;
+      margin-bottom: 12px;
+      background-color: #f9fafb;
+      position: relative;
+    }
+
+    .header-summary {
+      display: none;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: #374151;
+      cursor: pointer;
+    }
+
+    .header-summary-edit {
+      display: none; /* 使用右上角独立按钮控制展开/收起，避免文案重复 */
+    }
+
+    .header-summary-main {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 260px;
+    }
+
+    .header-summary-edit {
+      color: #0ABAB5;
+      font-weight: 600;
+      margin-left: 8px;
+      flex-shrink: 0;
+    }
+
+    .header-details {
+      margin-top: 4px;
+      max-height: 500px;
+      overflow: hidden;
+      transition: max-height 0.25s ease;
+    }
+
+    .header-details.collapsed {
+      max-height: 0;
+    }
+
+    .header-accordion.collapsed .header-summary {
+      display: flex;
+    }
+
+    .header-accordion.collapsed .header-details {
+      margin-top: 0;
+    }
+
+    .header-toggle-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      border: none;
+      background: transparent;
+      color: #0ABAB5;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
 
   <h3>Cheat Sheet Maker</h3>
-  <div class="toolbar">
-    <button id="btnReset" class="reset-btn" title="清空当前用户的知识库">清空知识库</button>
-  </div>
 
   <!-- 表单视图 -->
   <div id="view-form">
     <div class="main-content">
-      <!-- 基础信息 -->
-      <div class="form-group">
-        <label class="section-title" for="courseName">课程名称</label>
-        <input type="text" id="courseName" placeholder="例如: Machine Learning CS229" />
-      </div>
-
-      <div class="form-group">
-        <label class="section-title">学习层次</label>
-        <div class="radio-group">
-          <label class="radio-label">
-            <input type="radio" name="educationLevel" value="Undergraduate" checked> 本科
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="educationLevel" value="Graduate"> 研究生
-          </label>
+      <!-- 可折叠基础信息 Header -->
+      <div class="header-accordion" id="headerAccordion">
+        <button id="toggleHeaderBtn" class="header-toggle-btn" type="button">收起</button>
+        <div class="header-summary" id="headerSummary">
+          <div class="header-summary-main" id="headerSummaryMain">
+            课程未填写 · Final · Unlimited
+          </div>
+          <div class="header-summary-edit" id="headerSummaryEdit">展开</div>
         </div>
-      </div>
+        <div class="header-details" id="headerDetails">
+          <div class="form-group">
+            <label class="section-title" for="courseName">课程名称</label>
+            <input type="text" id="courseName" placeholder="例如: Machine Learning CS229" />
+          </div>
 
-      <div class="form-group">
-        <label class="section-title">考试类型</label>
-        <div class="radio-group">
-          <label class="radio-label">
-            <input type="radio" name="examType" value="Quiz"> Quiz
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="examType" value="Midterm"> Midterm
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="examType" value="Final" checked> Final
-          </label>
+          <div class="form-group">
+            <label class="section-title">学习层次</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="educationLevel" value="Undergraduate" checked> 本科
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="educationLevel" value="Graduate"> 研究生
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="section-title">考试类型</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="examType" value="Quiz"> Quiz
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="examType" value="Midterm"> Midterm
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="examType" value="Final" checked> Final
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="section-title">小抄页面限制</label>
+            <div class="radio-group">
+              <label class="radio-label"><input type="radio" name="pageLimit" value="1 side"> 1 Side</label>
+              <label class="radio-label"><input type="radio" name="pageLimit" value="1 page"> 1 Page</label>
+              <label class="radio-label"><input type="radio" name="pageLimit" value="2 pages"> 2 Pages</label>
+              <label class="radio-label"><input type="radio" name="pageLimit" value="Unlimited" checked> No Limit</label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="section-title" for="syllabusInput">考试大纲(可选)</label>
+            <textarea id="syllabusInput" rows="3" placeholder="在此粘贴考纲，AI 将优先提取相关内容..."></textarea>
+          </div>
         </div>
-      </div>
-
-      <div class="form-group">
-        <label class="section-title">小抄页面限制</label>
-        <div class="radio-group">
-          <label class="radio-label"><input type="radio" name="pageLimit" value="1 side"> 1 Side</label>
-          <label class="radio-label"><input type="radio" name="pageLimit" value="1 page"> 1 Page</label>
-          <label class="radio-label"><input type="radio" name="pageLimit" value="2 pages"> 2 Pages</label>
-          <label class="radio-label"><input type="radio" name="pageLimit" value="Unlimited" checked> No Limit</label>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label class="section-title" for="syllabusInput">考试大纲(可选)</label>
-        <textarea id="syllabusInput" rows="3" placeholder="在此粘贴考纲，AI 将优先提取相关内容..."></textarea>
       </div>
 
       <!-- 标签页 -->
@@ -496,7 +605,10 @@
 
       <!-- 标签页内容：当前页面 -->
       <div id="tab-current-page" class="tab-content active">
-        <button id="btnScanPage">扫描并添加到知识库</button>
+        <p style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">
+          捕获当前浏览器标签页中的主要文本内容，并保存到知识库。
+        </p>
+        <button id="btnScanPage">Scan &amp; Add to KB</button>
       </div>
 
       <!-- 标签页内容：粘贴文本 -->
@@ -505,7 +617,7 @@
           <label class="section-title" for="pasteTextInput">粘贴文本内容</label>
           <textarea id="pasteTextInput" rows="8" placeholder="在此粘贴文本内容..."></textarea>
         </div>
-        <button id="btnSaveText">保存文本到知识库</button>
+        <button id="btnSaveText">Save &amp; Add to KB</button>
       </div>
 
       <!-- 标签页内容：上传PDF -->
@@ -516,15 +628,20 @@
             <input type="file" id="pdfFileInput" accept=".pdf" />
           </div>
         </div>
-        <button id="btnUploadPdf">上传PDF到知识库</button>
+        <button id="btnUploadPdf">Upload PDF &amp; Add to KB</button>
       </div>
     </div>
 
     <!-- 底部固定栏 -->
     <div class="footer">
-      <div id="chunkCounter" class="counter-bar">已保存 0 个切片</div>
-      <div id="statusBar" class="status-bar"></div>
-      <button id="btnNextGenerate" class="footer-button">下一步：生成大纲</button>
+      <div class="footer-left">
+        <button id="btnReset" class="reset-btn" title="清空当前用户的知识库">🗑 清空</button>
+        <div id="chunkCounter" class="counter-bar">📚 0 Chunks</div>
+      </div>
+      <div class="footer-right">
+        <button id="btnNextGenerate" class="footer-button">Next: Generate Outline</button>
+        <div id="estimateLabel" class="estimate-badge"></div>
+      </div>
     </div>
   </div>
 
@@ -556,6 +673,7 @@
         <button id="btnBack" class="secondary-btn">返回修改</button>
         <button id="btnConfirmGenerate" class="primary-btn">确认并生成</button>
       </div>
+      <div id="outlineEstimateLabel" class="estimate-badge" style="text-align: right; margin-top: 6px;"></div>
     </div>
   </div>
 
