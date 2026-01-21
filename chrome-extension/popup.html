@@ -17,6 +17,35 @@
       height: 600px; /* 固定高度 */
     }
 
+    .toolbar {
+      display: flex;
+      justify-content: flex-end;
+      padding: 8px 12px 0 12px;
+      gap: 8px;
+    }
+
+    .reset-btn {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 6px;
+      background-color: #ef4444;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .reset-btn:hover {
+      background-color: #dc2626;
+    }
+
+    .counter-bar {
+      font-size: 12px;
+      color: #0f172a;
+      text-align: center;
+      min-height: 1.2em;
+    }
+
     h3 {
       margin: 0;
       padding: 16px;
@@ -307,10 +336,6 @@
       line-height: 1;
     }
 
-    .outline-item input[type="checkbox"]:hover {
-      /* 取消复选框本身的hover效果，保持颜色不变 */
-    }
-
     .outline-item label {
       flex: 1;
       cursor: pointer;
@@ -407,6 +432,9 @@
 <body>
 
   <h3>Cheat Sheet Maker</h3>
+  <div class="toolbar">
+    <button id="btnReset" class="reset-btn" title="清空当前用户的知识库">清空知识库</button>
+  </div>
 
   <!-- 表单视图 -->
   <div id="view-form">
@@ -494,6 +522,7 @@
 
     <!-- 底部固定栏 -->
     <div class="footer">
+      <div id="chunkCounter" class="counter-bar">已保存 0 个切片</div>
       <div id="statusBar" class="status-bar"></div>
       <button id="btnNextGenerate" class="footer-button">下一步：生成大纲</button>
     </div>

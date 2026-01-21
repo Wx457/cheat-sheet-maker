@@ -1,3 +1,4 @@
+import asyncio
 import traceback
 import time
 from datetime import datetime
@@ -449,7 +450,7 @@ async def download_cheat_sheet(project_id: str) -> Response:
                 "Content-Disposition": f'attachment; filename="cheat-sheet-{project_id}.pdf"'
             }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -457,6 +458,27 @@ async def download_cheat_sheet(project_id: str) -> Response:
         raise _create_error_response(
             error_type="PDF_GENERATION_ERROR",
             message="生成 PDF 失败",
+            details=str(e),
+            status_code=500
+        )
+
+
+@router.delete("/api/plugin/reset")
+async def reset_knowledge_base(
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+) -> dict:
+    """
+    Chrome 插件：重置当前用户的知识库（向量数据）。
+    """
+    try:
+        rag_service = get_rag_service()
+        deleted_count = await asyncio.to_thread(rag_service.delete_user_data, x_user_id)
+        return {"status": "success", "deleted_count": int(deleted_count)}
+    except Exception as e:
+        traceback.print_exc()
+        raise _create_error_response(
+            error_type="RESET_FAILED",
+            message="重置知识库失败",
             details=str(e),
             status_code=500
         )

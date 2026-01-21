@@ -2,6 +2,7 @@
 let currentProjectId = null
 let currentOutlineData = null
 let extendedTopics = []
+let chunkCount = 0
 
 // ========== [数据隔离] 用户 ID 管理 ==========
 async function getOrCreateUserId() {
@@ -59,6 +60,8 @@ const resultArea = document.getElementById('resultArea')
 const downloadLink = document.getElementById('downloadLink')
 const customTopicInput = document.getElementById('customTopicInput')
 const btnAddCustomTopic = document.getElementById('btnAddCustomTopic')
+const chunkCounter = document.getElementById('chunkCounter')
+const btnReset = document.getElementById('btnReset')
 
 // 按钮元素
 const btnScanPage = document.getElementById('btnScanPage')
@@ -81,6 +84,44 @@ function showStatusBar(message, type = '') {
 function clearStatusBar() {
   statusBar.textContent = ''
   statusBar.className = 'status-bar'
+}
+
+function updateChunkCounter() {
+  if (chunkCounter) {
+    chunkCounter.textContent = `已保存 ${chunkCount} 个切片`
+  }
+}
+
+// 知识库重置
+async function handleResetKnowledgeBase() {
+  if (!btnReset) return
+  btnReset.disabled = true
+  showStatusBar('正在清空知识库...', 'loading')
+  try {
+    const headers = await getHeaders()
+    const response = await fetch('http://127.0.0.1:8000/api/plugin/reset', {
+      method: 'DELETE',
+      headers
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      const msg = errorData.detail?.message || errorData.detail || '重置失败'
+      throw new Error(msg)
+    }
+
+    const data = await response.json()
+    chunkCount = 0
+    updateChunkCounter()
+    showStatusBar('Knowledge base cleared! 已清空知识库', 'success')
+    setTimeout(clearStatusBar, 3000)
+    console.log('重置结果', data)
+  } catch (error) {
+    showStatusBar(`❌ 错误: ${error.message}`, 'error')
+    console.error('重置失败:', error)
+  } finally {
+    btnReset.disabled = false
+  }
 }
 
 // 切换视图
@@ -284,6 +325,8 @@ async function handleScanPage() {
     
     if (data.status === 'success') {
       showStatusBar(`✅ 页面已扫描！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
+      chunkCount += Number(data.chunks_count || 0)
+      updateChunkCounter()
       setTimeout(clearStatusBar, 3000)
     } else {
       throw new Error('保存失败')
@@ -331,6 +374,8 @@ async function handleSaveText() {
     
     if (data.status === 'success') {
       showStatusBar(`✅ 文本已保存！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
+      chunkCount += Number(data.chunks_count || 0)
+      updateChunkCounter()
       textInput.value = '' // 清空输入框
       setTimeout(clearStatusBar, 3000)
     } else {
@@ -382,6 +427,8 @@ async function handleUploadPdf() {
     
     if (data.status === 'success') {
       showStatusBar(`✅ PDF已上传！已保存 ${data.chunks_count} 个切片到知识库`, 'success')
+      chunkCount += Number(data.chunks_count || 0)
+      updateChunkCounter()
       fileInput.value = '' // 清空文件选择
       setTimeout(clearStatusBar, 3000)
     } else {
@@ -673,6 +720,9 @@ btnUploadPdf.addEventListener('click', handleUploadPdf)
 btnNextGenerate.addEventListener('click', handleNextGenerate)
 btnBack.addEventListener('click', handleBack)
 btnConfirmGenerate.addEventListener('click', handleConfirmGenerate)
+if (btnReset) {
+  btnReset.addEventListener('click', handleResetKnowledgeBase)
+}
 
 // 绑定自定义主题相关事件
 if (btnAddCustomTopic && customTopicInput) {
@@ -691,3 +741,4 @@ if (btnAddCustomTopic && customTopicInput) {
 
 // 页面加载时初始化
 showView('form')
+updateChunkCounter()

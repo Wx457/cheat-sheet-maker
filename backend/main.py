@@ -1,9 +1,11 @@
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Final
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pymongo import MongoClient
 
 from arq.connections import create_pool, RedisSettings
 
@@ -32,6 +34,9 @@ async def lifespan(app: FastAPI):
     app.state.arq_pool = arq_pool
     
     print("✅ ARQ Redis 连接池已创建")
+
+    # 启动时：创建 MongoDB TTL 索引（幂等）
+    setup_mongodb_ttl_indexes()
     
     yield
     
@@ -57,6 +62,44 @@ app.include_router(generate_router)
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(plugin_router, tags=["Plugin"])
 app.include_router(task_router, tags=["Task"])
+
+
+# TTL 过期时间（秒）
+PROJECTS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 7  # 7 天
+VECTORS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 3   # 3 天
+
+
+def setup_mongodb_ttl_indexes() -> None:
+    """
+    在启动时为 MongoDB 创建 TTL 索引。
+    MongoDB 会自动去重创建，重复调用安全。
+    """
+    client = None
+    try:
+        client = MongoClient(settings.MONGODB_URI)
+        db = client[settings.DB_NAME]
+
+        # projects 集合：根据 created_at 7 天过期
+        projects = db["projects"]
+        projects.create_index("created_at", expireAfterSeconds=PROJECTS_TTL_SECONDS)
+
+        # 向量集合：metadata.created_at 3 天过期
+        vectors = db[settings.COLLECTION_NAME]
+        vectors.create_index(
+            "metadata.created_at",
+            expireAfterSeconds=VECTORS_TTL_SECONDS,
+        )
+
+        print("✅ MongoDB TTL 索引检查/创建完成")
+    except Exception as exc:
+        # 记录错误，但不阻止应用启动
+        print(f"⚠️ 创建 MongoDB TTL 索引时出错: {exc}")
+    finally:
+        try:
+            if client:
+                client.close()
+        except Exception:
+            pass
 
 # 挂载静态文件（前端构建产物）
 # 注意：static 目录应该在 Dockerfile 构建时从 frontend/dist 复制过来

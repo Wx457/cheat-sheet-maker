@@ -1,6 +1,7 @@
 import asyncio
 import io
 import time
+from datetime import datetime
 from typing import List
 from pymongo import MongoClient
 from pypdf import PdfReader
@@ -64,7 +65,8 @@ class RAGService:
         # user_id 是必需的，必须添加到 metadata 中
         metadata = {
             "source": source_name,
-            "user_id": user_id
+            "user_id": user_id,
+            "created_at": datetime.utcnow(),  # 用于 TTL 过期
         }
         
         documents = [
@@ -149,6 +151,25 @@ class RAGService:
             embedding=self.embeddings,
             index_name="default"
         )
+
+    def delete_user_data(self, user_id: str) -> int:
+        """
+        删除指定用户的全部向量数据。
+        
+        Args:
+            user_id: 用户 ID
+        
+        Returns:
+            删除的文档数量
+        """
+        try:
+            result = self.collection.delete_many({"user_id": {"$eq": user_id}})
+            deleted_count = result.deleted_count
+            print(f"✅ 已删除用户 {user_id} 的向量数据 {deleted_count} 条")
+            return deleted_count
+        except Exception as exc:
+            print(f"❌ 删除用户向量数据时出错: {exc}")
+            raise
     
     async def search_context_mmr(self, query: str, user_id: str, k: int = 3, fetch_k: int = 10) -> List[dict]:
         """

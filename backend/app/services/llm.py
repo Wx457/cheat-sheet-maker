@@ -601,28 +601,45 @@ async def generate_cheat_sheet(request: GenerateSheetRequest, user_id: str) -> C
         print(f"⏱️ [性能监控] generate_cheat_sheet - JSON 解析耗时: {parse_elapsed:.2f} 秒")
         # ========== [性能监控 - 可删除] ==========
 
-        # 类型清洗逻辑 (Type Sanitizer)
-        # 目的：将 LLM 自创的 type (如 "exam_question", "concept") 
-        # 强制映射回合法的 ContentType (text, equation, definition)
-        # valid_types = ["text", "equation", "definition"]
-        
-        # for section in data.get("sections", []):
-        #     for item in section.get("items", []):
-        #         original_type = str(item.get("type", "text")).lower().strip()
-                
-        #         # 如果已经是合法的，跳过
-        #         if original_type in valid_types:
-        #             continue 
-                
-        #         # 智能映射
-        #         if original_type in ["concept", "term", "vocabulary", "key_point"]:
-        #             item["type"] = "definition"
-        #         elif original_type in ["formula", "math", "derivation", "proof"]:
-        #             item["type"] = "equation"
-        #         else:
-        #             # 兜底策略：所有其他奇怪的类型 (exam_question, comparison, difference, code, step...) 
-        #             # 全部归为 "text"
-        #             item["type"] = "text"
+        # 类型清洗逻辑：LLM 可能返回非枚举值，统一降级为 text
+        valid_types = {"text", "equation", "definition"}
+        for section in data.get("sections", []) or []:
+            for item in section.get("items", []) or []:
+                original_type = str(item.get("type", "text")).lower().strip()
+                if original_type not in valid_types:
+                    item["type"] = "text"
+                else:
+                    item["type"] = original_type
+
+        # 文本清洗与合并：连续 text 条目拼接，且 text 内部不保留换行（减少占用空间）
+        for section in data.get("sections", []) or []:
+            items = section.get("items", []) or []
+            merged_items = []
+            for item in items:
+                item_type = str(item.get("type", "text")).lower().strip()
+                if item_type != "text":
+                    merged_items.append(item)
+                    continue
+
+                # 规范化 text 内容：将所有空白（含换行）压缩为单个空格
+                raw_content = item.get("content", "")
+                content = " ".join(str(raw_content).split())
+                item["content"] = content
+
+                # 合并连续 text
+                if merged_items and str(merged_items[-1].get("type", "")).lower().strip() == "text":
+                    prev = merged_items[-1]
+                    prev_content = " ".join(str(prev.get("content", "")).split())
+                    if prev_content and content:
+                        prev["content"] = f"{prev_content} {content}"
+                    elif content:
+                        prev["content"] = content
+                    else:
+                        prev["content"] = prev_content
+                else:
+                    merged_items.append(item)
+
+            section["items"] = merged_items
 
         return CheatSheetSchema(**data)
 
