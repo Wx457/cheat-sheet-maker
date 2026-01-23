@@ -60,6 +60,7 @@ const viewOutline = document.getElementById('view-outline')
 const outlineList = document.getElementById('outline-list')
 const resultArea = document.getElementById('resultArea')
 const downloadLink = document.getElementById('downloadLink')
+const btnBackHome = document.getElementById('btnBackHome')
 const customTopicInput = document.getElementById('customTopicInput')
 const btnAddCustomTopic = document.getElementById('btnAddCustomTopic')
 const chunkCounter = document.getElementById('chunkCounter')
@@ -960,6 +961,46 @@ async function handleConfirmGenerate() {
   }
 }
 
+// 结果页：返回首页（表单视图）
+function handleBackHome() {
+  // 隐藏结果区域，返回表单视图
+  if (resultArea) {
+    resultArea.style.display = 'none'
+  }
+  if (viewForm) {
+    viewForm.style.display = 'block'
+  }
+  if (viewOutline) {
+    viewOutline.style.display = 'none'
+  }
+
+  // 重置与生成相关的按钮和提示，方便重新开始
+  if (btnNextGenerate) {
+    btnNextGenerate.disabled = false
+    btnNextGenerate.textContent = 'Next: Generate Outline'
+  }
+  if (btnConfirmGenerate) {
+    btnConfirmGenerate.disabled = false
+    btnConfirmGenerate.textContent = 'Submit'
+  }
+  if (estimateLabel) {
+    estimateLabel.textContent = ''
+  }
+  if (outlineEstimateLabel) {
+    outlineEstimateLabel.textContent = ''
+  }
+
+  // 清理 PDF blob URL，避免内存泄漏
+  if (downloadLink && downloadLink.href && downloadLink.href.startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(downloadLink.href)
+    } catch (e) {
+      console.warn('Failed to revoke object URL:', e)
+    }
+    downloadLink.href = '#'
+  }
+}
+
 // 绑定事件
 btnScanPage.addEventListener('click', handleScanPage)
 btnSaveText.addEventListener('click', handleSaveText)
@@ -969,6 +1010,9 @@ btnBack.addEventListener('click', handleBack)
 btnConfirmGenerate.addEventListener('click', handleConfirmGenerate)
 if (btnReset) {
   btnReset.addEventListener('click', handleResetKnowledgeBase)
+}
+if (btnBackHome) {
+  btnBackHome.addEventListener('click', handleBackHome)
 }
 
 // 绑定自定义主题相关事件

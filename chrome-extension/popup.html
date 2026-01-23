@@ -417,7 +417,7 @@
     #resultArea {
       margin-top: 10px;
       text-align: center;
-      padding: 8px;
+      padding: 12px 8px 14px 8px;
       background-color: rgba(10, 186, 181, 0.15);
       border-radius: 4px;
     }
@@ -430,9 +430,24 @@
       font-weight: bold;
       border-radius: 4px;
       transition: opacity 0.2s;
+      margin-bottom: 8px;
     }
     #resultArea a:hover {
       opacity: 0.9;
+    }
+    #btnBackHome {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      background-color: #f1f5f9;
+      color: #0f172a;
+      cursor: pointer;
+    }
+    #btnBackHome:hover {
+      background-color: #e2e8f0;
     }
 
     .toolbar {
@@ -681,6 +696,9 @@
 
   <div id="resultArea" style="display:none; padding: 16px;">
     <a id="downloadLink" href="#" target="_blank">Download PDF</a>
+    <div style="margin-top: 4px;">
+      <button id="btnBackHome" type="button">Back to Home</button>
+    </div>
   </div>
 
   <script src="formPersistence.js"></script>
