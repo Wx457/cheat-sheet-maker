@@ -1,7 +1,10 @@
-// 全局状态管理
+// 全局状态管理（暴露到 window 以便 formPersistence.js 访问）
 let currentProjectId = null
+window.currentProjectId = currentProjectId
 let currentOutlineData = null
+window.currentOutlineData = currentOutlineData
 let extendedTopics = []
+window.extendedTopics = extendedTopics
 let chunkCount = 0
 
 // ========== [数据隔离] 用户 ID 管理 ==========
@@ -208,14 +211,19 @@ async function handleResetKnowledgeBase() {
   }
 }
 
-// 切换视图
-function showView(viewName) {
+// 切换视图（保存为全局函数以便 formPersistence.js 可以拦截）
+window.showView = function showView(viewName) {
   if (viewName === 'form') {
     viewForm.style.display = 'block'
     viewOutline.style.display = 'none'
   } else if (viewName === 'outline') {
     viewForm.style.display = 'none'
     viewOutline.style.display = 'block'
+  }
+  
+  // 通知持久化模块视图已切换
+  if (typeof formPersistence !== 'undefined' && formPersistence.saveFormData) {
+    setTimeout(() => formPersistence.saveFormData(), 100)
   }
 }
 
@@ -579,8 +587,9 @@ async function handleNextGenerate() {
       throw new Error('Analysis result format error: missing topics field')
     }
     
-    // 保存分析结果
+    // 保存分析结果（同步到 window 对象）
     currentOutlineData = result
+    window.currentOutlineData = result
     
     // 渲染主题复选框列表
     renderOutlineList(result.topics)
@@ -614,8 +623,10 @@ function renderOutlineList(topics) {
   
   if (topics && topics.length > 0) {
     extendedTopics = topics.map(t => ({ ...t, isCustom: false }))
+    window.extendedTopics = extendedTopics
   } else {
     extendedTopics = []
+    window.extendedTopics = []
   }
   
   renderExtendedTopics()
@@ -685,6 +696,7 @@ function handleAddCustomTopic() {
   }
   
   extendedTopics.push(newTopic)
+  window.extendedTopics = extendedTopics
   customTopicInput.value = ''
   
   renderExtendedTopics()
@@ -864,6 +876,11 @@ async function handleConfirmGenerate() {
     // 显示结果区域
     resultArea.style.display = 'block'
     
+    // 任务完成后清除草稿
+    if (typeof formPersistence !== 'undefined' && formPersistence.clearDraft) {
+      formPersistence.clearDraft()
+    }
+    
     console.log('✅ PDF generated successfully, result area displayed')
     
   } catch (error) {
@@ -925,8 +942,10 @@ if (btnAddCustomTopic && customTopicInput) {
 }
 
 // 页面加载时初始化
+// 先设置默认视图（如果持久化模块没有恢复视图，则使用默认值）
 showView('form')
-// 先从本地存储恢复，然后从服务器同步最新值
+
+// 先从本地存储恢复 chunks 数量，然后从服务器同步最新值
 chrome.storage.local.get(['chunk_count'], async (result) => {
   if (typeof result?.chunk_count === 'number') {
     chunkCount = result.chunk_count
@@ -936,6 +955,9 @@ chrome.storage.local.get(['chunk_count'], async (result) => {
   await syncChunkCountFromServer()
 })
 buildHeaderSummary()
+
+// 注意：formPersistence.js 的初始化在 popup.html 的 script 标签中处理
+// 这样可以确保所有 DOM 元素和全局变量都已准备好
 
 // Header Accordion：点击“编辑/摘要”展开
 if (headerSummary) {
