@@ -36,10 +36,51 @@ class CheatSheetService:
             storage_client=get_minio_client(),
         )
 
-    def generate_outline(self, text: str, context: Optional[str] = None, exam_type: ExamType = ExamType.final) -> OutlineResponse:
+    async def generate_outline(self, text: str, context: Optional[str] = None, exam_type: ExamType = ExamType.final, user_id: Optional[str] = None) -> OutlineResponse:
+        """
+        生成大纲（优化版：添加 RAG 检索支持）。
+        
+        Args:
+            text: 用户输入的文本（如 syllabus）
+            context: 用户背景信息（如课程名称）
+            exam_type: 考试类型
+            user_id: 用户 ID（用于 RAG 检索时的数据隔离）
+        """
         cleaned_text = clean_raw_text(text)
         cleaned_context = clean_raw_text(context) if context else None
-        prompt = CheatSheetPrompts.render_outline_prompt(cleaned_text, cleaned_context, exam_type)
+        
+        # RAG 检索：从向量库检索相关内容
+        rag_context_str = ""
+        if user_id:
+            rag_start = time.time()
+            # 使用 text 作为查询（通常是 syllabus 或课程描述）
+            query = cleaned_text[:200] if len(cleaned_text) > 200 else cleaned_text
+            print(f"🕵️ [RAG DEBUG] generate_outline - 开始 RAG 检索，查询: {query[:100]}...，user_id: {user_id}")
+            
+            results = await self.rag_service.search_context(query, user_id=user_id, k=10)
+            rag_elapsed = time.time() - rag_start
+            
+            print(f"🕵️ [RAG DEBUG] generate_outline - RAG 检索耗时: {rag_elapsed:.2f} 秒，检索到 {len(results)} 个结果")
+            
+            if results:
+                rag_context_str = "\n--- RAG Context from Vector Database ---\n"
+                for r in results:
+                    rag_context_str += f"Source: {r['source']}\n"
+                    rag_context_str += f"Content: {r['content'][:300]}...\n"  # 限制长度用于日志
+                    rag_context_str += "---------------------------------------\n"
+                print(f"🕵️ [RAG DEBUG] generate_outline - 检索到 {len(results)} 个上下文块，总长度: {len(rag_context_str)} 字符")
+                print(f"🕵️ [RAG DEBUG] generate_outline - 上下文预览（前200字符）: {rag_context_str[:200]}...")
+            else:
+                print(f"⚠️ [RAG WARNING] generate_outline - 未检索到任何上下文！LLM 将基于用户输入生成通用大纲。")
+        else:
+            print(f"⚠️ [RAG WARNING] generate_outline - 未提供 user_id，跳过 RAG 检索")
+        
+        # 合并用户背景信息和 RAG 上下文
+        combined_context = cleaned_context or ""
+        if rag_context_str:
+            combined_context += "\n\n" + rag_context_str if combined_context else rag_context_str
+        
+        prompt = CheatSheetPrompts.render_outline_prompt(cleaned_text, combined_context if combined_context else None, exam_type)
 
         api_start = time.time()
         response_text = self.gemini.generate_text(prompt)

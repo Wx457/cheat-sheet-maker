@@ -47,6 +47,37 @@ class ClearResponse(BaseModel):
     deleted_count: int
 
 
+class ChunkCountResponse(BaseModel):
+    """Chunks 数量响应模型"""
+    status: str
+    chunks_count: int
+
+
+@router.get("/chunks/count", response_model=ChunkCountResponse)
+async def get_chunk_count(
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+) -> ChunkCountResponse:
+    """
+    获取当前用户的 chunks 数量
+    
+    用于前端同步显示最新的 chunks 数量。
+    """
+    try:
+        ingestion = IngestionService.default()
+        chunks_count = ingestion.rag_service.get_user_chunk_count(x_user_id)
+        
+        return ChunkCountResponse(
+            status="success",
+            chunks_count=chunks_count
+        )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取 chunks 数量时发生错误: {str(e)}"
+        )
+
+
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_text(
     payload: IngestRequest = Body(...),

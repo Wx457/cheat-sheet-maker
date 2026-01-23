@@ -54,7 +54,12 @@ IMPORTANT: Double-escape backslashes in LaTeX strings (e.g., \\\\sigma).
 
         user_input = f"对话记录：\n{cleaned_text}\n\n"
         if cleaned_context:
-            user_input += f"用户背景信息：\n{cleaned_context}\n\n"
+            # 如果包含 RAG 上下文，明确标注
+            if "--- RAG Context from Vector Database ---" in cleaned_context:
+                user_input += f"[RAG Context - 优先使用以下内容]\n{cleaned_context}\n[End of RAG Context]\n\n"
+                user_input += "重要提示：请优先从上述 RAG Context 中提取主题，这些内容来自向量数据库，是课程的实际内容。\n\n"
+            else:
+                user_input += f"用户背景信息：\n{cleaned_context}\n\n"
         return f"{system_prompt}\n\n{user_input}"
 
     @staticmethod

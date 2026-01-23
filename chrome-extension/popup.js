@@ -106,6 +106,32 @@ function autoCollapseHeaderIfNeeded() {
   }
 }
 
+// 从后端获取最新的 chunks 数量并同步
+async function syncChunkCountFromServer() {
+  try {
+    const headers = await getHeaders()
+    const response = await fetch('http://127.0.0.1:8000/api/rag/chunks/count', {
+      method: 'GET',
+      headers
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.status === 'success' && typeof data.chunks_count === 'number') {
+        chunkCount = data.chunks_count
+        updateChunkCounter()
+        persistChunkCount()
+        setHeaderCollapsed(chunkCount > 0)
+        console.log(`✅ 已从服务器同步 chunks 数量: ${chunkCount}`)
+      }
+    } else {
+      console.warn('⚠️ 无法从服务器获取 chunks 数量，使用本地缓存值')
+    }
+  } catch (error) {
+    console.warn('⚠️ 同步 chunks 数量失败，使用本地缓存值:', error)
+  }
+}
+
 function updateChunkCounter() {
   if (chunkCounter) {
     chunkCounter.textContent = `📚 ${chunkCount} Chunks`
@@ -900,13 +926,14 @@ if (btnAddCustomTopic && customTopicInput) {
 
 // 页面加载时初始化
 showView('form')
-chrome.storage.local.get(['chunk_count'], (result) => {
+// 先从本地存储恢复，然后从服务器同步最新值
+chrome.storage.local.get(['chunk_count'], async (result) => {
   if (typeof result?.chunk_count === 'number') {
     chunkCount = result.chunk_count
+    updateChunkCounter()
   }
-  updateChunkCounter()
-  // 启动时：有已存数据则收起，否则展开
-  setHeaderCollapsed(chunkCount > 0)
+  // 从服务器同步最新的 chunks 数量（覆盖本地缓存）
+  await syncChunkCountFromServer()
 })
 buildHeaderSummary()
 

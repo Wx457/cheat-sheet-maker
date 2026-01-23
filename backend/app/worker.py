@@ -21,35 +21,36 @@ async def generate_outline_task(
     raw_text: str,
     user_context: str = None,
     exam_type: str = "final",
-    user_id: str = None  # 接受 user_id 参数以保持 API 一致性（虽然此任务不涉及 RAG，但 API 会传递）
+    user_id: str = None  # 必需，用于 RAG 检索时的数据隔离
 ) -> Dict[str, Any]:
     """
-    ARQ 任务：生成大纲
-    
-    注意：此任务不涉及 RAG 检索，但接受 user_id 参数以保持 API 一致性。
+    ARQ 任务：生成大纲（优化版：支持 RAG 检索）
     
     Args:
         ctx: ARQ 上下文
-        raw_text: 原始文本
-        user_context: 用户背景信息
+        raw_text: 原始文本（通常是大纲或课程描述）
+        user_context: 用户背景信息（如课程名称）
         exam_type: 考试类型
-        user_id: 用户 ID（可选，用于保持 API 一致性，此任务不使用）
+        user_id: 用户 ID（必需，用于 RAG 检索时的数据隔离）
         
     Returns:
         任务结果
     """
     # ========== [性能监控 - 可删除] ==========
     task_start_time = time.time()
-    print(f"⏱️ [性能监控] generate_outline_task 开始执行")
+    print(f"⏱️ [性能监控] generate_outline_task 开始执行，user_id: {user_id}")
     
     try:
         exam_type_enum = ExamType(exam_type)
+        
+        if not user_id:
+            print(f"⚠️ [WARNING] generate_outline_task - 未提供 user_id，RAG 检索将被跳过")
         
         # ========== [性能监控 - 可删除] ==========
         llm_start_time = time.time()
         
         service = CheatSheetService.default()
-        result = service.generate_outline(text=raw_text, context=user_context, exam_type=exam_type_enum)
+        result = await service.generate_outline(text=raw_text, context=user_context, exam_type=exam_type_enum, user_id=user_id)
         
         # ========== [性能监控 - 可删除] ==========
         llm_elapsed = time.time() - llm_start_time
