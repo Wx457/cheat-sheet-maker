@@ -11,6 +11,7 @@ cheat-sheet-maker/
 │   │   ├── setup_mongodb_ttl_indexes # 创建 MongoDB TTL 索引（projects/vectors）
 │   │   └── health()                  # 健康检查
 │   ├── requirements.txt              # Python 依赖包
+│   ├── Dockerfile                    # 后端 Docker 镜像构建文件
 │   │
 │   ├── app/                          # 应用主目录
 │   │   ├── __init__.py
@@ -18,19 +19,9 @@ cheat-sheet-maker/
 │   │   ├── api/                      # API 路由层
 │   │   │   ├── __init__.py
 │   │   │   ├── generate.py           # 生成 Cheat Sheet 的 API (异步任务模式)
-│   │   │   │   ├── generate_outline()      # 入队 generate_outline_task，返回 task_id
-│   │   │   │   └── generate_cheat_sheet()  # 入队 generate_cheat_sheet_task，传递用户上下文
 │   │   │   ├── plugin.py             # Chrome 插件相关 API (异步任务模式)
-│   │   │   │   ├── _create_error_response() # 统一结构化错误包装
-│   │   │   │   ├── plugin_analyze()        # 摄入网页文本→RAG 检索→入队大纲任务
-│   │   │   │   └── plugin_generate_final() # 根据选题入队小抄生成任务（含元数据）
 │   │   │   ├── rag.py                # RAG 知识库 API (摄入/搜索/清理)
-│   │   │   │   ├── ingest_text()          # 文本切片后写入向量库（按 user_id 隔离）
-│   │   │   │   ├── search_context()       # 基于向量检索相关片段
-│   │   │   │   ├── ingest_file()          # 读取 PDF→提取文本→向量化存储
-│   │   │   │   └── clear_vector_data()    # 清理旧向量数据防止维度不匹配
 │   │   │   └── task.py               # 任务状态查询 API
-│   │   │       └── get_task_status()      # 查询 ARQ 任务状态并返回预签名下载链接
 │   │   │
 │   │   ├── core/                     # 核心配置
 │   │   │   ├── __init__.py
@@ -39,80 +30,66 @@ cheat-sheet-maker/
 │   │   ├── schemas/                  # 数据模型定义
 │   │   │   ├── __init__.py
 │   │   │   └── cheat_sheet.py        # Cheat Sheet 相关 Schema
-│   │   │       ├── GenerateOutlineRequest / GenerateSheetRequest # 请求载体/枚举定义
-│   │   │       ├── PluginAnalyzeRequest / PluginGenerateRequest  # 插件端请求模型
-│   │   │       └── CheatSheetSchema / OutlineResponse           # LLM 输出/小抄结构
 │   │   │
 │   │   ├── application/services/     # 用例级编排层（Application Layer）
+│   │   │   ├── __init__.py
 │   │   │   ├── ingestion_service.py
-│   │   │   │   ├── IngestionService.process_text() # 清洗→向量化写入
-│   │   │   │   └── IngestionService.process_file() # 校验PDF→解析→写入
 │   │   │   └── cheat_sheet_service.py
-│   │   │       ├── CheatSheetService.generate_outline()      # 调用 Gemini 生成大纲
-│   │   │       └── CheatSheetService.create_cheat_sheet_flow() # RAG→预算→LLM→清洗→PDF→上传→入库
 │   │   │
 │   │   ├── domain/                   # 纯业务规则与提示（Domain Layer）
-│   │   │   ├── rules/budget.py
-│   │   │   │   └── BudgetRule.calculate()     # 按页数/相关性分配条目预算
-│   │   │   ├── prompts/templates.py
-│   │   │   │   ├── CheatSheetPrompts.render_outline_prompt()  # 大纲提示词
-│   │   │   │   └── CheatSheetPrompts.render_cheatsheet_prompt() # 小抄提示词
+│   │   │   ├── rules/
+│   │   │   │   └── budget.py
+│   │   │   ├── prompts/
+│   │   │   │   └── templates.py
 │   │   │   └── utils/
 │   │   │       ├── cleaner.py
-│   │   │       │   ├── clean_raw_text()        # 输入清洗（去零宽字符/空白压缩/剥离 HTML）
-│   │   │       │   └── repair_json_string()    # LLM JSON 修复
 │   │   │       └── math_formatter.py
-│   │   │           └── normalize_equation()      # 公式统一 $$ 包裹
 │   │   │
 │   │   ├── infrastructure/           # 底层客户端（Infrastructure Layer）
 │   │   │   ├── llm/
 │   │   │   │   ├── gemini_client.py
-│   │   │   │   │   └── GeminiClient.generate_text()/generate_json() # 带重试的 Gemini 调用
 │   │   │   │   └── openai_client.py
-│   │   │   │       └── OpenAIClient.embed_documents()/embed_query() # OpenAI Embedding
-│   │   │   ├── pdf/renderer.py
-│   │   │   │   └── generate_pdf_via_browser() # Playwright 渲染前端静态页生成 PDF
-│   │   │   ├── rag/vector_store.py
-│   │   │   │   ├── VectorStore.ingest_text()/ingest_pdf() # 切片→向量化→MongoDB
-│   │   │   │   ├── search_context_mmr()/search_context() # 基于 user_id 的检索/MMR 去重
-│   │   │   │   ├── delete_user_data()/clear_vector_data() # 用户/全量向量清理
-│   │   │   │   └── get_vector_store()   # 单例获取 VectorStore
-│   │   │   └── storage/minio_client.py
-│   │   │       ├── MinIOClient.ensure_bucket()    # 创建/检查桶
-│   │   │       ├── upload_file()                  # 上传文件到 MinIO/S3
-│   │   │       ├── get_presigned_url()            # 生成预签名 URL
-│   │   │       └── get_minio_client()             # 单例获取 MinIOClient
+│   │   │   ├── pdf/
+│   │   │   │   └── renderer.py
+│   │   │   ├── rag/
+│   │   │   │   └── vector_store.py
+│   │   │   └── storage/
+│   │   │       └── minio_client.py
+│   │   │
+│   │   └── worker.py                 # ARQ Worker 任务定义
 │   │
-│   ├── worker.py                     # ARQ Worker 进程 (独立运行)
-│   │   ├── generate_outline_task()   # 任务：调用 CheatSheetService.generate_outline
-│   │   ├── generate_cheat_sheet_task() # 任务：调用 CheatSheetService.create_cheat_sheet_flow
-│   │   └── WorkerSettings            # ARQ 配置/任务列表
+│   ├── static/                       # 前端构建产物与 demo HTML（由 npm run deploy 生成）
+│   │   ├── index.html                # 首页展示页（纯静态 HTML）
+│   │   ├── render.html               # React 渲染器入口（供 Playwright 生成 PDF 使用）
+│   │   ├── vite.svg
+│   │   └── assets/                   # Vite 构建出的 js/css/font 等静态资源
 │   ├── tipstxt/                      # 提示词文件
 │   │   ├── bashOrder.txt
 │   │   ├── cheat-sheet-maker.txt
 │   │   ├── GPT_APIkey.txt
 │   │   └── PromotionList.txt
-│   │
-│   └── venv/                         # Python 虚拟环境
 │
 ├── frontend/                         # 前端应用 (React + TypeScript + Vite)
-│   ├── package.json                  # Node.js 依赖
+│   ├── package.json                  # Node.js 依赖与脚本
+│   ├── package-lock.json             # 锁定依赖版本
 │   ├── vite.config.ts                # Vite 配置
-│   ├── tsconfig.json                 # TypeScript 配置
+│   ├── eslint.config.js              # ESLint 配置
+│   ├── tsconfig.json                 # TypeScript 基础配置
+│   ├── tsconfig.app.json             # 应用构建 tsconfig
+│   ├── tsconfig.node.json            # Node/Vite 相关 tsconfig
+│   ├── index.html                    # 首页展示页（纯静态 HTML + Tailwind）
+│   ├── render.html                   # React 渲染器入口（含 <div id="root"> 和 /src/main.tsx）
 │   │
 │   ├── src/                          # 源代码目录
 │   │   ├── main.tsx                  # React 应用入口
-│   │   ├── App.tsx                   # 主应用组件
 │   │   ├── App.css                   # 主样式文件
 │   │   ├── index.css                 # 全局样式
 │   │   │
-│   │   ├── components/               # React 组件
-│   │   │   ├── IngestPanel.tsx       # 内容摄入面板
-│   │   │   ├── InputArea.tsx         # 输入区域组件
-│   │   │   ├── Preview.tsx           # 预览组件
-│   │   │   ├── PreviewPage.tsx       # 预览页面
-│   │   │   ├── SetupForm.tsx         # 设置表单
-│   │   │   └── TopicSelector.tsx     # 主题选择器
+│   │   ├── components/               # 复用组件
+│   │   │   └── Preview.tsx           # 预览组件（承载小抄内容）
+│   │   │
+│   │   ├── pages/                    # 页面级组件
+│   │   │   └── PrintPage.tsx         # 打印 / 导出 页面
 │   │   │
 │   │   ├── types/                    # TypeScript 类型定义
 │   │   │   └── index.ts
@@ -120,14 +97,22 @@ cheat-sheet-maker/
 │   │   └── assets/                   # 静态资源
 │   │       └── react.svg
 │   │
-│   └── public/                       # 公共静态文件
-│       └── vite.svg
+│   ├── public/                       # 公共静态文件（开发/构建时拷贝）
+│   │   └── vite.svg
+│   │
+│   └── dist/                         # 前端构建输出目录（由 npm run build/deploy 生成）
+│       ├── index.html                # 打包后的首页展示页
+│       ├── render.html               # 打包后的 React 渲染器入口
+│       ├── vite.svg
+│       └── assets/                   # 生产环境 js/css/font 等资源
 │
 ├── chrome-extension/                 # Chrome 浏览器插件
 │   ├── manifest.json                 # 插件配置文件
+│   ├── background.js                 # 背景脚本（处理长连接、消息转发）
+│   ├── content.js                    # 内容脚本（抓取网页内容）
 │   ├── popup.html                    # 弹出窗口 HTML
 │   ├── popup.js                      # 弹出窗口逻辑
-│   ├── content.js                    # 内容脚本
+│   ├── formPersistence.js            # 表单数据持久化逻辑
 │   ├── icon16.png                    # 图标 (16x16)
 │   ├── icon48.png                    # 图标 (48x48)
 │   ├── icon120.png                   # 图标 (120x120)
@@ -478,7 +463,9 @@ cheat-sheet-maker/
 ## 📝 关键文件说明
 
 ### 后端入口
-- `backend/main.py` - FastAPI 应用启动入口，配置 CORS、路由和 ARQ 连接池
+- `backend/main.py` - FastAPI 应用启动入口，配置 CORS、路由、ARQ 连接池与静态资源挂载
+  - 挂载目录：`backend/static`（由前端构建产物填充）
+  - 访问路径：`/static`（HTML） 与 `/assets`（JS/CSS 等资源）
 - `backend/app/worker.py` - ARQ Worker 进程入口（独立运行）
 
 ### 前端入口
@@ -488,7 +475,8 @@ cheat-sheet-maker/
 ### 配置文件
 - `backend/app/core/config.py` - 应用配置管理（MongoDB、Redis、MinIO、API Keys）
 - `backend/requirements.txt` - Python 依赖
-- `frontend/package.json` - Node.js 依赖
+- `frontend/package.json` - Node.js 依赖与构建/部署脚本
+  - `npm run deploy`：构建前端 → 将 `dist/*` 拷贝到 `backend/static/`，供 FastAPI 静态服务与 PDF 渲染使用
 
 ### 启动方式
 - **API Server**: `python main.py` 或 `uvicorn main:app`
@@ -575,5 +563,5 @@ cheat-sheet-maker/
 
 ---
 
-*最后更新: 2025年*
+*最后更新: 2026年1月*
 

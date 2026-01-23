@@ -11,7 +11,10 @@ from playwright.async_api import async_playwright
 
 
 # 前端 URL 配置（使用 HashRouter，所以是 #/print）
-FRONTEND_URL = "http://localhost:8000/static/index.html#/print"
+# 现在使用 Vite 多入口构建：
+# - /static/index.html  -> 纯静态展示页
+# - /static/render.html -> React 渲染器（给 Playwright 使用）
+FRONTEND_URL = "http://localhost:8000/static/render.html#/print"
 
 
 async def generate_pdf_via_browser(data_json: Dict[str, Any]) -> bytes:
