@@ -84,6 +84,10 @@ const outlineEstimateLabel = document.getElementById('outlineEstimateLabel')
 const tabs = document.querySelectorAll('.tab')
 const tabContents = document.querySelectorAll('.tab-content')
 
+// Step1（Generate Outline）计时
+let outlineTimerId = null
+let outlineElapsed = 0
+
 // Step2（Confirm & Generate）计时
 let contentTimerId = null
 let contentElapsed = 0
@@ -544,10 +548,23 @@ async function handleUploadPdf() {
 // 下一步：生成大纲
 async function handleNextGenerate() {
   if (!btnNextGenerate) return
+  
+  // Step 1：智能计时器（类似 Step 2）
+  const estSeconds = Math.round(10 + (chunkCount * 0.2)) // Outline 生成通常比 Content 生成快
+  if (estimateLabel) {
+    estimateLabel.textContent = `Est: ~${estSeconds}s`
+  }
+  
   btnNextGenerate.disabled = true
-  btnNextGenerate.textContent = 'Generating Outline...'
-  // Step 1 不需要估时/计时
-  if (estimateLabel) estimateLabel.textContent = ''
+  outlineElapsed = 0
+  btnNextGenerate.textContent = 'Generating Outline... (0s)'
+  if (outlineTimerId) {
+    clearInterval(outlineTimerId)
+  }
+  outlineTimerId = setInterval(() => {
+    outlineElapsed += 1
+    btnNextGenerate.textContent = `Generating Outline... (${outlineElapsed}s)`
+  }, 1000)
 
   try {
     const formData = collectFormData()
@@ -594,6 +611,13 @@ async function handleNextGenerate() {
     // 渲染主题复选框列表
     renderOutlineList(result.topics)
     
+    // 成功：清掉计时器
+    if (outlineTimerId) {
+      clearInterval(outlineTimerId)
+      outlineTimerId = null
+    }
+    if (estimateLabel) estimateLabel.textContent = ''
+    
     // 切换到大纲视图
     showView('outline')
     // 进入 Step 2（确认并生成）前，恢复主页面按钮状态，避免下次打开是错误状态
@@ -601,6 +625,14 @@ async function handleNextGenerate() {
     
   } catch (error) {
     console.error('Generation failed:', error)
+    // 确保计时器被清除
+    if (outlineTimerId) {
+      clearInterval(outlineTimerId)
+      outlineTimerId = null
+    }
+    if (estimateLabel) {
+      estimateLabel.textContent = ''
+    }
     // 错误时总是重置按钮状态，允许用户重试
     if (btnNextGenerate) {
       btnNextGenerate.disabled = false
@@ -611,6 +643,13 @@ async function handleNextGenerate() {
   } finally {
     // 如果当前仍在form视图（说明没有成功切换到outline），确保按钮可用
     if (viewForm.style.display !== 'none' && btnNextGenerate) {
+      if (outlineTimerId) {
+        clearInterval(outlineTimerId)
+        outlineTimerId = null
+      }
+      if (estimateLabel) {
+        estimateLabel.textContent = ''
+      }
       btnNextGenerate.disabled = false
       btnNextGenerate.textContent = 'Next: Generate Outline'
     }
@@ -734,6 +773,12 @@ function handleBack() {
     customTopicInput.value = ''
   }
   
+  // 清除 Step 1 的计时器（如果存在）
+  if (outlineTimerId) {
+    clearInterval(outlineTimerId)
+    outlineTimerId = null
+  }
+  
   // CRITICAL: 重置主视图按钮状态，允许用户重新生成outline
   if (btnNextGenerate) {
     btnNextGenerate.disabled = false
@@ -753,7 +798,7 @@ function handleBack() {
 async function handleConfirmGenerate() {
   if (!btnConfirmGenerate) return
   // Step 2：智能计时器（重活在这里）
-  const estSeconds = Math.round(15 + (chunkCount * 0.6))
+  const estSeconds = Math.round(15 + (chunkCount * 0.5))
   if (outlineEstimateLabel) {
     outlineEstimateLabel.textContent = `Est: ~${estSeconds}s`
   }

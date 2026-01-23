@@ -174,12 +174,7 @@ class VectorStore:
             f"⏱️ [性能监控] search_context_mmr - MMR 搜索耗时: {search_elapsed:.2f} 秒，查询: {query[:50]}...，返回 {len(results)} 个结果"
         )
         
-        # 🔍 [DEBUG] 打印结果详情
-        if results:
-            print(f"🔍 [Vector Search] search_context_mmr - 成功检索到 {len(results)} 个结果")
-            for i, doc in enumerate(results[:3]):  # 只打印前3个
-                print(f"🔍 [Vector Search] 结果 {i+1}: source={doc.metadata.get('source', 'unknown')}, content_preview={doc.page_content[:100]}...")
-        else:
+        if not results:
             print(f"⚠️ [Vector Search] search_context_mmr - 未检索到任何结果！可能原因：")
             print(f"   - 过滤器路径不匹配（当前: metadata.user_id）")
             print(f"   - user_id 不匹配（当前: {user_id}）")

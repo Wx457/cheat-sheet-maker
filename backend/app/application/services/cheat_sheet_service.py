@@ -14,7 +14,7 @@ from app.domain.rules.budget import BudgetRule
 from app.domain.utils.math_formatter import normalize_equation
 from app.infrastructure.llm.gemini_client import GeminiClient
 from app.schemas import CheatSheetSchema, ExamType, GenerateSheetRequest, OutlineResponse, TopicInput
-from app.domain.utils.cleaner import clean_raw_text, repair_json_string
+from app.domain.utils.cleaner import clean_raw_text, repair_json_string, densify_item_content
 from app.infrastructure.pdf.renderer import generate_pdf_via_browser
 from app.infrastructure.rag.vector_store import VectorStore, get_vector_store
 from app.infrastructure.storage.minio_client import MinIOClient, get_minio_client
@@ -206,17 +206,25 @@ class CheatSheetService:
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
 
-        # 5) normalize/clean
+        # 5) densify item content (BEFORE schema / PDF / MongoDB)
+        # - Replace internal newlines with spaces
+        # - Convert markdown list newlines to bullet points
+        for section in data.get("sections", []) or []:
+            for item in section.get("items", []) or []:
+                if item.get("type") in ["text", "equation"]:
+                    item["content"] = densify_item_content(item.get("content", ""))
+
+        # 6) normalize/clean
         cheat_sheet = CheatSheetSchema(**data)
         cheat_sheet_dict = cheat_sheet.model_dump()
         self._clean_equations(cheat_sheet_dict)
 
-        # 6) pdf
+        # 7) pdf
         pdf_start = time.time()
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
         print(f"⏱️ [性能监控] create_cheat_sheet_flow - PDF 生成耗时: {time.time() - pdf_start:.2f} 秒")
 
-        # 7) upload
+        # 8) upload
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         safe_title = "".join(c for c in cheat_sheet.title if c.isalnum() or c in (" ", "-", "_")).rstrip()
         safe_title = safe_title.replace(" ", "_")[:50]
@@ -225,7 +233,7 @@ class CheatSheetService:
         if not file_key:
             raise ValueError("PDF 上传到 MinIO 失败")
 
-        # 8) save record
+        # 9) save record
         project_id = self._save_project_if_needed(cheat_sheet, metadata)
 
         result: Dict[str, Any] = {

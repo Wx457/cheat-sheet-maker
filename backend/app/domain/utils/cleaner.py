@@ -34,3 +34,29 @@ def repair_json_string(json_str: str) -> str:
     return repair_json(json_str, return_objects=False)
 
 
+def densify_item_content(text: str) -> str:
+    """
+    压缩单个 item 内部的换行，减少 PDF 版面浪费。
+
+    规则：
+    - 若包含代码块标记 ``` ，不做任何处理（避免破坏格式）
+    - 将换行后的 Markdown 列表项（- / *）合并为 bullet：`\\n- xxx` -> `  • xxx`
+    - 其余换行折叠为双空格，避免 end\\nstart 变成 endstart（至少保留空格）
+
+    说明：对 LaTeX 安全——LaTeX 通常将空白/换行视为等价空白。
+    """
+    if not text:
+        return ""
+
+    if "```" in text:
+        return text
+
+    # Step 1: Replace Markdown list markers (newline + dash/star) with a bullet point
+    text = re.sub(r"\n\s*[-*]\s+", "  • ", text)
+
+    # Step 2: Replace remaining newlines with double spaces
+    text = re.sub(r"\s*\n\s*", "  ", text)
+
+    return text.strip()
+
+
