@@ -550,7 +550,7 @@ async function handleNextGenerate() {
   if (!btnNextGenerate) return
   
   // Step 1：智能计时器（类似 Step 2）
-  const estSeconds = Math.round(10 + (chunkCount * 0.2)) // Outline 生成通常比 Content 生成快
+  const estSeconds = Math.round(8 + (chunkCount * 0.1)) // Outline 生成通常比 Content 生成快
   if (estimateLabel) {
     estimateLabel.textContent = `Est: ~${estSeconds}s`
   }
@@ -798,7 +798,7 @@ function handleBack() {
 async function handleConfirmGenerate() {
   if (!btnConfirmGenerate) return
   // Step 2：智能计时器（重活在这里）
-  const estSeconds = Math.round(15 + (chunkCount * 0.5))
+  const estSeconds = Math.round(15 + (chunkCount * 0.4))
   if (outlineEstimateLabel) {
     outlineEstimateLabel.textContent = `Est: ~${estSeconds}s`
   }
