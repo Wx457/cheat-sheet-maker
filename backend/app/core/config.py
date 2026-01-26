@@ -22,11 +22,14 @@ class Settings:
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     
-    # MinIO/S3 配置
+    # AWS S3 配置
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")  # 默认 us-east-1，建议在 .env 中设置为实际使用的区域（如 us-east-2）
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "cheat-sheets")
-    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "http://localhost:9000")
+    
+    # PDF 生成配置
+    PDF_GENERATION_HOST: str = os.getenv("PDF_GENERATION_HOST", "http://localhost:8000")  # Worker 进程访问 FastAPI 服务器的地址
     
     @classmethod
     def validate(cls) -> None:

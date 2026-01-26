@@ -50,11 +50,11 @@ cheat-sheet-maker/
 │   │   │   │   ├── gemini_client.py
 │   │   │   │   └── openai_client.py
 │   │   │   ├── pdf/
-│   │   │   │   └── renderer.py
+│   │   │   │   └── renderer.py  # Playwright 渲染前端页面生成 PDF（使用 PDF_GENERATION_HOST 配置）
 │   │   │   ├── rag/
 │   │   │   │   └── vector_store.py
 │   │   │   └── storage/
-│   │   │       └── minio_client.py
+│   │   │       └── minio_client.py  # AWS S3 客户端封装（类名保持 MinIOClient 以保持兼容性）
 │   │   │
 │   │   └── worker.py                 # ARQ Worker 任务定义
 │   │
@@ -154,7 +154,7 @@ cheat-sheet-maker/
 │              Worker 进程 (消费者/Consumer)                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
 │  │  LLM Service │  │ PDF Service  │  │ Storage      │ │
-│  │  (Gemini)    │  │ (Playwright) │  │ (MinIO/S3)   │ │
+│  │  (Gemini)    │  │ (Playwright) │  │ (AWS S3)     │ │
 │  └──────────────┘  └──────────────┘  └──────────────┘ │
 │                                                          │
 │  职责：从队列取任务 → 执行耗时操作 → 存储结果               │
@@ -164,7 +164,7 @@ cheat-sheet-maker/
 ┌─────────────────────────────────────────────────────────┐
 │                   数据存储层 (Data Layer)                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ MongoDB Atlas│  │ Vector Store │  │ MinIO/S3     │ │
+│  │ MongoDB Atlas│  │ Vector Store │  │ AWS S3       │ │
 │  │ (文档存储)    │  │ (1536维向量) │  │ (PDF 文件)   │ │
 │  └──────────────┘  └──────────────┘  └──────────────┘ │
 └─────────────────────────────────────────────────────────┘
@@ -286,10 +286,11 @@ cheat-sheet-maker/
 [清洗数据] (清洗公式格式)
     │
     ▼
-[生成 PDF] (pdf_service.py + Playwright)
+[生成 PDF] (renderer.py + Playwright)
+    │    └──→ 访问 {PDF_GENERATION_HOST}/static/render.html#/print
     │
     ▼
-[上传到 MinIO] (storage.py)
+[上传到 AWS S3] (minio_client.py)
     │
     ▼
 [返回结果] {file_key, project_id, ...}
@@ -309,7 +310,7 @@ cheat-sheet-maker/
 - **任务队列**: ARQ (Async Redis Queue)
 - **消息队列**: Redis
 - **数据库**: MongoDB Atlas (向量搜索 + 文档存储)
-- **对象存储**: MinIO (S3 兼容)
+- **对象存储**: AWS S3
 - **Embedding**: OpenAI `text-embedding-3-small` (1536维)
 - **LLM**: Google Gemini 2.5 Flash
 - **向量存储**: MongoDB Atlas Vector Search
@@ -378,19 +379,19 @@ cheat-sheet-maker/
   - `generate_cheat_sheet_html()` - 生成完整 HTML
   - `clean_latex_content()` - 清洗和转换 LaTeX 公式（防止 XSS 注入）
 
-### 5. Storage Service (`storage.py`)
-- **功能**: MinIO/S3 对象存储服务
+### 5. Storage Service (`minio_client.py`)
+- **功能**: AWS S3 对象存储服务（类名保持 MinIOClient 以保持兼容性）
 - **主要方法**:
-  - `ensure_bucket()` - 检查并创建 Bucket
-  - `upload_file()` - 上传文件到 MinIO，返回 file_key
+  - `ensure_bucket()` - 检查并创建 Bucket（根据 AWS_REGION 自动处理 LocationConstraint）
+  - `upload_file()` - 上传文件到 AWS S3，返回 file_key
   - `get_presigned_url()` - 生成预签名下载链接（1小时有效）
 
 ### 6. Worker 进程 (`worker.py`)
 - **功能**: ARQ Worker，执行耗时任务
 - **任务函数**:
   - `generate_outline_task` - 生成大纲
-  - `generate_cheat_sheet_task` - 生成小抄（全流程：LLM → HTML → PDF → MinIO）
-  - `generate_pdf_task` - 生成 PDF 并上传到 MinIO
+  - `generate_cheat_sheet_task` - 生成小抄（全流程：LLM → HTML → PDF → AWS S3）
+  - `generate_pdf_task` - 生成 PDF 并上传到 AWS S3（已弃用，统一使用 create_cheat_sheet_flow）
 - **启动方式**: `arq app.worker.WorkerSettings`
 
 ## 🔐 配置管理
@@ -405,10 +406,11 @@ cheat-sheet-maker/
 - `REDIS_PORT` - Redis 端口 (默认: `6379`)
 - `REDIS_DB` - Redis 数据库编号 (默认: `0`)
 - `REDIS_PASSWORD` - Redis 密码 (可选)
-- `AWS_ACCESS_KEY_ID` - MinIO/S3 访问密钥
-- `AWS_SECRET_ACCESS_KEY` - MinIO/S3 秘密密钥
+- `AWS_ACCESS_KEY_ID` - AWS S3 访问密钥
+- `AWS_SECRET_ACCESS_KEY` - AWS S3 秘密密钥
+- `AWS_REGION` - AWS 区域 (默认: `us-east-1`，建议设置为实际使用的区域如 `us-east-2`)
 - `S3_BUCKET_NAME` - S3 Bucket 名称 (默认: `cheat-sheets`)
-- `S3_ENDPOINT_URL` - MinIO/S3 端点 URL (默认: `http://localhost:9000`)
+- `PDF_GENERATION_HOST` - PDF 生成服务地址 (默认: `http://localhost:8000`，Worker 进程访问 FastAPI 服务器的地址)
 
 ## 🚀 部署架构
 
@@ -452,7 +454,7 @@ cheat-sheet-maker/
        │                 │          │
        ▼                 ▼          ▼
 ┌─────────────┐   ┌─────────────┐ ┌─────────────┐
-│  MongoDB    │   │  MinIO/S3   │ │  OpenAI API │
+│  MongoDB    │   │  AWS S3     │ │  OpenAI API │
 │  Atlas      │   │  (PDF存储)   │ │  Gemini API │
 │             │   │             │ │             │
 │ - 向量索引  │   │ - PDF文件   │ │ - LLM调用   │
@@ -473,7 +475,7 @@ cheat-sheet-maker/
 - `frontend/src/App.tsx` - 主应用组件
 
 ### 配置文件
-- `backend/app/core/config.py` - 应用配置管理（MongoDB、Redis、MinIO、API Keys）
+- `backend/app/core/config.py` - 应用配置管理（MongoDB、Redis、AWS S3、PDF 生成、API Keys）
 - `backend/requirements.txt` - Python 依赖
 - `frontend/package.json` - Node.js 依赖与构建/部署脚本
   - `npm run deploy`：构建前端 → 将 `dist/*` 拷贝到 `backend/static/`，供 FastAPI 静态服务与 PDF 渲染使用
@@ -488,7 +490,7 @@ cheat-sheet-maker/
 - **LLM 模型**: Google Gemini 2.5 Flash
 - **向量存储**: MongoDB Atlas Vector Search
 - **任务队列**: ARQ 0.26.3
-- **对象存储**: MinIO (S3 兼容)
+- **对象存储**: AWS S3
 - **FastAPI**: 0.128.0
 - **React**: 18.3.1
 - **TypeScript**: 5.9.3
@@ -498,7 +500,7 @@ cheat-sheet-maker/
 
 ### 生产者-消费者模式
 - **API Server (生产者)**: 接收 HTTP 请求，将任务推送到 Redis 队列，立即返回 `task_id`
-- **Worker (消费者)**: 独立进程，从 Redis 队列消费任务，执行耗时操作（LLM、PDF、MinIO 上传）
+- **Worker (消费者)**: 独立进程，从 Redis 队列消费任务，执行耗时操作（LLM、PDF、AWS S3 上传）
 - **优势**: 
   - API 响应速度快，不阻塞
   - 支持任务重试和并发控制
@@ -521,9 +523,16 @@ cheat-sheet-maker/
 - **实现位置**: `backend/app/services/llm.py` - `generate_cheat_sheet()` 函数
 
 ### 文件存储
-- PDF 文件存储在 MinIO 对象存储中
+- PDF 文件存储在 AWS S3 对象存储中
 - 使用预签名 URL 提供临时访问（1小时有效）
 - 文件按日期组织：`YYYYMMDD/{uuid}_{filename}.pdf`
+- Bucket 创建时根据 `AWS_REGION` 自动设置 LocationConstraint（`us-east-1` 除外）
+
+### PDF 生成配置
+- Worker 进程使用 Playwright 访问前端渲染页面生成 PDF
+- 通过 `PDF_GENERATION_HOST` 环境变量配置 FastAPI 服务器地址
+- 默认访问路径：`{PDF_GENERATION_HOST}/static/render.html#/print`
+- 部署时需确保 Worker 进程能够访问到 FastAPI 服务器（Docker 环境建议使用服务名）
 
 ## ⚡ 性能优化与监控
 
@@ -564,4 +573,31 @@ cheat-sheet-maker/
 ---
 
 *最后更新: 2026年1月*
+
+## 📋 环境变量配置清单
+
+### 必需配置
+- `MONGODB_URI` - MongoDB 连接字符串
+- `GOOGLE_API_KEY` - Google Gemini API Key
+- `OPENAI_API_KEY` - OpenAI API Key（用于 Embedding）
+
+### AWS S3 配置
+- `AWS_ACCESS_KEY_ID` - AWS S3 访问密钥
+- `AWS_SECRET_ACCESS_KEY` - AWS S3 秘密密钥
+- `AWS_REGION` - AWS 区域（如 `us-east-2`）
+- `S3_BUCKET_NAME` - S3 Bucket 名称（默认: `cheat-sheets`）
+
+### PDF 生成配置
+- `PDF_GENERATION_HOST` - Worker 进程访问 FastAPI 服务器的地址
+  - 本地开发: `http://localhost:8000`
+  - Docker Compose: `http://backend:8000`（使用服务名）
+  - 其他环境: 根据实际网络配置
+
+### 可选配置
+- `DB_NAME` - 数据库名称（默认: `cheat_sheet_db`）
+- `COLLECTION_NAME` - 集合名称（默认: `knowledge_base`）
+- `REDIS_HOST` - Redis 主机（默认: `localhost`）
+- `REDIS_PORT` - Redis 端口（默认: `6379`）
+- `REDIS_DB` - Redis 数据库编号（默认: `0`）
+- `REDIS_PASSWORD` - Redis 密码（可选）
 

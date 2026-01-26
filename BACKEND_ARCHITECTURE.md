@@ -33,7 +33,7 @@ backend/
 │   │   │   └── IngestionService.process_file() # 校验PDF→解析→写入
 │   │   └── cheat_sheet_service.py
 │   │       ├── CheatSheetService.generate_outline()      # 调用 Gemini 生成大纲
-│   │       └── CheatSheetService.create_cheat_sheet_flow() # RAG→预算→LLM→清洗→PDF→上传→入库
+│   │       └── CheatSheetService.create_cheat_sheet_flow() # RAG→预算→LLM→清洗→PDF→上传到AWS S3→入库
 │   │
 │   ├── domain/                     # 纯业务规则与提示
 │   │   ├── rules/budget.py
@@ -55,17 +55,17 @@ backend/
 │   │   │   └── openai_client.py
 │   │   │       └── OpenAIClient.embed_documents()/embed_query() # OpenAI Embedding
 │   │   ├── pdf/renderer.py
-│   │   │   └── generate_pdf_via_browser() # Playwright 渲染前端静态页生成 PDF
+│   │   │   └── generate_pdf_via_browser() # Playwright 渲染前端静态页生成 PDF（使用 PDF_GENERATION_HOST 配置访问 FastAPI）
 │   │   ├── rag/vector_store.py
 │   │   │   ├── VectorStore.ingest_text()/ingest_pdf() # 切片→向量化→MongoDB
 │   │   │   ├── search_context_mmr()/search_context() # 基于 user_id 的检索/MMR 去重
 │   │   │   ├── delete_user_data()/clear_vector_data() # 用户/全量向量清理
 │   │   │   └── get_vector_store()   # 单例获取 VectorStore
 │   │   └── storage/minio_client.py
-│   │       ├── MinIOClient.ensure_bucket()    # 创建/检查桶
-│   │       ├── upload_file()                  # 上传文件到 MinIO/S3
+│   │       ├── MinIOClient.ensure_bucket()    # 创建/检查 AWS S3 Bucket（根据 AWS_REGION 处理 LocationConstraint）
+│   │       ├── upload_file()                  # 上传文件到 AWS S3
 │   │       ├── get_presigned_url()            # 生成预签名 URL
-│   │       └── get_minio_client()             # 单例获取 MinIOClient
+│   │       └── get_minio_client()             # 单例获取 MinIOClient（类名保持兼容性）
 │   │
 │   └── worker.py                    # ARQ 任务注册（委托 Application）
 │       ├── generate_outline_task()      # 调用 CheatSheetService.generate_outline

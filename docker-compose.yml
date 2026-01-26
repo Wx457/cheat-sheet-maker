@@ -1,86 +1,60 @@
 version: '3.8'
 
 services:
-  # 1. Redis 服务 (消息队列)
+  # 1. Redis 服务 (必须保留，用于消息队列)
   redis:
     image: redis:alpine
     container_name: cheat-redis
     ports:
-      - "6379:6379" # 映射到主机，方便本地调试
+      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
       - app_network
 
-  # 2. MinIO 服务 (模拟 AWS S3)
-  minio:
-    image: minio/minio
-    container_name: cheat-minio
-    ports:
-      - "9000:9000" # API 端口
-      - "9001:9001" # 控制台端口
-    environment:
-      MINIO_ROOT_USER: minioadmin      # 账号
-      MINIO_ROOT_PASSWORD: minioadmin  # 密码
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - app_network
-
-  # 3. FastAPI 后端 (生产者)
+  # 2. FastAPI 后端
   backend:
     build: 
-      context: ./backend # 指向 Dockerfile 所在目录
+      context: ./backend
     container_name: cheat-backend
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      - ./backend:/app # 挂载代码，实现热重载 (改代码不用重启容器)
+      - ./backend:/app
     ports:
       - "8000:8000"
+    # Redis 配置
     environment:
-      - REDIS_HOST=redis   # 注意：在 Docker 里主机名是服务名 "redis"
+      - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - S3_ENDPOINT_URL=http://minio:9000
+    # AWS 的配置：Docker 会自动读取这个文件里的 AWS_ACCESS_KEY 等变量
     env_file:
-      - ./backend/.env # 读取你的 API Key
+      - ./backend/.env
     depends_on:
       - redis
-      - minio
     networks:
       - app_network
 
-  # 4. ARQ Worker (消费者)
+  # 3. ARQ Worker (消费者)
   worker:
     build: 
       context: ./backend
     container_name: cheat-worker
-    # 启动命令：运行 arq worker
     command: arq app.worker.WorkerSettings --watch app
     volumes:
       - ./backend:/app
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - S3_ENDPOINT_URL=http://minio:9000
     env_file:
       - ./backend/.env
     depends_on:
       - redis
-      - minio
     networks:
       - app_network
 
-# 定义数据卷 (持久化存储)
 volumes:
   redis_data:
-  minio_data:
 
-# 定义网络
 networks:
   app_network:
     driver: bridge

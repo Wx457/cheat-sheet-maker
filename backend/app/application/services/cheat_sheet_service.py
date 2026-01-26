@@ -52,15 +52,10 @@ class CheatSheetService:
         # RAG 检索：从向量库检索相关内容
         rag_context_str = ""
         if user_id:
-            rag_start = time.time()
             # 使用 text 作为查询（通常是 syllabus 或课程描述）
             query = cleaned_text[:200] if len(cleaned_text) > 200 else cleaned_text
-            print(f"🕵️ [RAG DEBUG] generate_outline - 开始 RAG 检索，查询: {query[:100]}...，user_id: {user_id}")
             
             results = await self.rag_service.search_context(query, user_id=user_id, k=10)
-            rag_elapsed = time.time() - rag_start
-            
-            print(f"🕵️ [RAG DEBUG] generate_outline - RAG 检索耗时: {rag_elapsed:.2f} 秒，检索到 {len(results)} 个结果")
             
             if results:
                 rag_context_str = "\n--- RAG Context from Vector Database ---\n"
@@ -68,12 +63,6 @@ class CheatSheetService:
                     rag_context_str += f"Source: {r['source']}\n"
                     rag_context_str += f"Content: {r['content'][:300]}...\n"  # 限制长度用于日志
                     rag_context_str += "---------------------------------------\n"
-                print(f"🕵️ [RAG DEBUG] generate_outline - 检索到 {len(results)} 个上下文块，总长度: {len(rag_context_str)} 字符")
-                print(f"🕵️ [RAG DEBUG] generate_outline - 上下文预览（前200字符）: {rag_context_str[:200]}...")
-            else:
-                print(f"⚠️ [RAG WARNING] generate_outline - 未检索到任何上下文！LLM 将基于用户输入生成通用大纲。")
-        else:
-            print(f"⚠️ [RAG WARNING] generate_outline - 未提供 user_id，跳过 RAG 检索")
         
         # 合并用户背景信息和 RAG 上下文
         combined_context = cleaned_context or ""
@@ -82,9 +71,7 @@ class CheatSheetService:
         
         prompt = CheatSheetPrompts.render_outline_prompt(cleaned_text, combined_context if combined_context else None, exam_type)
 
-        api_start = time.time()
         response_text = self.gemini.generate_text(prompt)
-        print(f"⏱️ [性能监控] generate_outline(app) - Gemini API 调用耗时: {time.time() - api_start:.2f} 秒")
 
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
@@ -140,7 +127,6 @@ class CheatSheetService:
 
         # 2) RAG context
         rag_context_str = ""
-        rag_start = time.time()
         if request_data.selected_topics:
             import asyncio
 
@@ -171,7 +157,6 @@ class CheatSheetService:
                     rag_context_str += f"Source: {r['source']}\n"
                     rag_context_str += f"Content: {r['content']}\n"
                     rag_context_str += "---------------------------------------\n"
-        print(f"⏱️ [性能监控] create_cheat_sheet_flow - RAG 检索耗时: {time.time() - rag_start:.2f} 秒")
 
         # 3) prompt
         exam_type_context = {ExamType.quiz: "Quiz", ExamType.midterm: "Midterm", ExamType.final: "Final"}.get(
@@ -200,18 +185,17 @@ class CheatSheetService:
         )
 
         # 4) llm
-        api_start = time.time()
         response_text = self.gemini.generate_text(prompt)
-        print(f"⏱️ [性能监控] create_cheat_sheet_flow - Gemini API 调用耗时: {time.time() - api_start:.2f} 秒")
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
 
         # 5) densify item content (BEFORE schema / PDF / MongoDB)
         # - Replace internal newlines with spaces
         # - Convert markdown list newlines to bullet points
+        # NOTE: Only process "text" type, NOT "equation" type (equations should preserve their format)
         for section in data.get("sections", []) or []:
             for item in section.get("items", []) or []:
-                if item.get("type") in ["text", "equation"]:
+                if item.get("type") == "text":
                     item["content"] = densify_item_content(item.get("content", ""))
 
         # 6) normalize/clean
@@ -220,9 +204,7 @@ class CheatSheetService:
         self._clean_equations(cheat_sheet_dict)
 
         # 7) pdf
-        pdf_start = time.time()
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
-        print(f"⏱️ [性能监控] create_cheat_sheet_flow - PDF 生成耗时: {time.time() - pdf_start:.2f} 秒")
 
         # 8) upload
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -231,7 +213,7 @@ class CheatSheetService:
         filename = f"{safe_title}_{timestamp}.pdf"
         file_key = self.storage_client.upload_file(pdf_bytes, filename)
         if not file_key:
-            raise ValueError("PDF 上传到 MinIO 失败")
+            raise ValueError("PDF 上传到 S3 失败")
 
         # 9) save record
         project_id = self._save_project_if_needed(cheat_sheet, metadata)

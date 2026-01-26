@@ -1,6 +1,5 @@
 import asyncio
 import traceback
-import time
 from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Body, HTTPException, Request, Header
@@ -84,31 +83,16 @@ async def plugin_analyze(
     2. 检索：根据 syllabus 检索相关上下文
     3. 生成：提取考试主题列表
     """
-    # ========== [性能监控 - 可删除] ==========
-    api_start_time = time.time()
-    print(f"⏱️ [性能监控] plugin_analyze API 开始执行")
-    # ========== [性能监控 - 可删除] ==========
-    
     try:
         ingestion = IngestionService.default()
 
-        ingest_start_time = time.time()
         chunks_count = await ingestion.process_text(
             text=payload.content,
             metadata={"course_name": payload.course_name, "url": payload.url, "source": payload.course_name or payload.url},
             user_id=x_user_id,
         )
         
-        # ========== [性能监控 - 可删除] ==========
-        ingest_elapsed = time.time() - ingest_start_time
-        print(f"⏱️ [性能监控] plugin_analyze - Step 1 保存到向量库耗时: {ingest_elapsed:.2f} 秒，保存 {chunks_count} 个切片")
-        # ========== [性能监控 - 可删除] ==========
-        
         print(f"✅ 已保存 {chunks_count} 个切片到向量库")
-        
-        # ========== [性能监控 - 可删除] ==========
-        search_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
         
         # Step 2: 检索相关上下文
         # 注意：刚保存的内容已经进入向量库，可以立即检索到
@@ -131,11 +115,6 @@ async def plugin_analyze(
                     rag_context_str += f"Source: {r['source']}\n"
                     rag_context_str += f"Content: {r['content']}\n"
                     rag_context_str += "---------------------------------------\n"
-        
-        # ========== [性能监控 - 可删除] ==========
-        search_elapsed = time.time() - search_start_time
-        print(f"⏱️ [性能监控] plugin_analyze - Step 2 检索上下文耗时: {search_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         
         # Step 3: 生成主题列表（改为异步任务模式）
         # 基于检索到的 RAG 上下文生成主题列表
@@ -161,11 +140,6 @@ async def plugin_analyze(
             exam_type=(payload.exam_type or ExamType.final).value,
             user_id=x_user_id
         )
-        
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] plugin_analyze API 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         
         return TaskResponse(
             task_id=job.job_id,
@@ -367,16 +341,7 @@ async def download_cheat_sheet(project_id: str) -> Response:
     2. 使用 React 前端渲染引擎生成 PDF（通过 pdf_service.generate_pdf_via_browser）
     3. 返回 PDF 文件流
     """
-    # ========== [性能监控 - 可删除] ==========
-    api_start_time = time.time()
-    print(f"⏱️ [性能监控] download_cheat_sheet API 开始执行，project_id: {project_id}")
-    # ========== [性能监控 - 可删除] ==========
-    
     try:
-        # ========== [性能监控 - 可删除] ==========
-        db_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
-        
         # 1. 从数据库获取项目数据，确保数据已存库
         client = MongoClient(settings.MONGODB_URI)
         db = client[settings.DB_NAME]
@@ -413,20 +378,10 @@ async def download_cheat_sheet(project_id: str) -> Response:
         
         client.close()
         
-        # ========== [性能监控 - 可删除] ==========
-        db_elapsed = time.time() - db_start_time
-        print(f"⏱️ [性能监控] download_cheat_sheet - Step 1 从数据库获取项目数据耗时: {db_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
-        
         # 2. 使用 React 前端渲染引擎生成 PDF
         # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
         # PDF 服务会访问 React 静态页面并注入数据
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet_data)
-        
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] download_cheat_sheet API 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         
         # 3. 返回 PDF 文件流
         return Response(

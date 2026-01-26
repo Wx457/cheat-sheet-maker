@@ -36,27 +36,14 @@ async def generate_outline_task(
     Returns:
         任务结果
     """
-    # ========== [性能监控 - 可删除] ==========
-    task_start_time = time.time()
-    print(f"⏱️ [性能监控] generate_outline_task 开始执行，user_id: {user_id}")
-    
     try:
         exam_type_enum = ExamType(exam_type)
         
         if not user_id:
             print(f"⚠️ [WARNING] generate_outline_task - 未提供 user_id，RAG 检索将被跳过")
         
-        # ========== [性能监控 - 可删除] ==========
-        llm_start_time = time.time()
-        
         service = CheatSheetService.default()
         result = await service.generate_outline(text=raw_text, context=user_context, exam_type=exam_type_enum, user_id=user_id)
-        
-        # ========== [性能监控 - 可删除] ==========
-        llm_elapsed = time.time() - llm_start_time
-        print(f"⏱️ [性能监控] LLM 生成大纲耗时: {llm_elapsed:.2f} 秒")
-        total_elapsed = time.time() - task_start_time
-        print(f"⏱️ [性能监控] generate_outline_task 总耗时: {total_elapsed:.2f} 秒")
         
         # 返回结果（ARQ 会自动存储）
         return {
@@ -64,9 +51,6 @@ async def generate_outline_task(
             "data": result.model_dump()
         }
     except Exception as e:
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - task_start_time
-        print(f"⏱️ [性能监控] generate_outline_task 失败，总耗时: {total_elapsed:.2f} 秒")
 
         return {
             "success": False,
@@ -87,7 +71,7 @@ async def generate_cheat_sheet_task(
     2. 保存到数据库（如果包含 _metadata）
     3. 清洗数据（清洗公式格式）
     4. 生成 PDF（使用 React 前端渲染）
-    5. 上传到 MinIO
+    5. 上传到 S3
     6. 返回包含 file_key 的结果
     
     注意：RAG 检索优化（并行 MMR + 去重）在 generate_cheat_sheet() 函数内部实现。
@@ -99,10 +83,6 @@ async def generate_cheat_sheet_task(
     Returns:
         任务结果（包含 file_key 和 project_id）
     """
-    # ========== [性能监控 - 可删除] ==========
-    task_start_time = time.time()
-    print(f"⏱️ [性能监控] generate_cheat_sheet_task 开始执行")
-    
     try:
         # 提取元数据（如果存在）
         metadata = kwargs.pop("_metadata", None)
@@ -116,21 +96,11 @@ async def generate_cheat_sheet_task(
         # 构建请求参数
         generate_request = GenerateSheetRequest(**kwargs)
         
-        # ========== [性能监控 - 可删除] ==========
-        llm_start_time = time.time()
-        
         service = CheatSheetService.default()
         result_data = await service.create_cheat_sheet_flow(generate_request, user_id=user_id, metadata=metadata)
         
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - task_start_time
-        print(f"⏱️ [性能监控] generate_cheat_sheet_task 总耗时: {total_elapsed:.2f} 秒")
-        
         return result_data
     except Exception as e:
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - task_start_time
-        print(f"⏱️ [性能监控] generate_cheat_sheet_task 失败，总耗时: {total_elapsed:.2f} 秒")
         return {
             "status": "failed",
             "error": str(e),
@@ -143,7 +113,7 @@ async def generate_pdf_task(
     cheat_sheet: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    ARQ 任务：生成 PDF 并上传到 MinIO
+    ARQ 任务：生成 PDF 并上传到 S3
     
     Args:
         ctx: ARQ 上下文
@@ -152,10 +122,6 @@ async def generate_pdf_task(
     Returns:
         任务结果（包含 file_key）
     """
-    # ========== [性能监控 - 可删除] ==========
-    task_start_time = time.time()
-    print(f"⏱️ [性能监控] generate_pdf_task 开始执行")
-    
     raise NotImplementedError("generate_pdf_task 已弃用：请使用 create_cheat_sheet_flow 统一流程。")
 
 

@@ -1,5 +1,4 @@
 import traceback
-import time
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
 from pydantic import BaseModel
@@ -88,11 +87,6 @@ async def ingest_text(
     
     接收原始文本，切分后存入 MongoDB Atlas Vector Search。
     """
-    # ========== [性能监控 - 可删除] ==========
-    api_start_time = time.time()
-    print(f"⏱️ [性能监控] /api/rag/ingest API 开始执行")
-    # ========== [性能监控 - 可删除] ==========
-    
     try:
         ingestion = IngestionService.default()
         chunks_count = await ingestion.process_text(
@@ -101,20 +95,11 @@ async def ingest_text(
             user_id=x_user_id,
         )
         
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] /api/rag/ingest API 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
-        
         return IngestResponse(
             status="success",
             chunks_count=chunks_count
         )
     except Exception as e:
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] /api/rag/ingest API 失败，总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
@@ -132,11 +117,6 @@ async def search_context(
     
     根据查询文本，返回最相关的文档片段。
     """
-    # ========== [性能监控 - 可删除] ==========
-    api_start_time = time.time()
-    print(f"⏱️ [性能监控] /api/rag/search API 开始执行，查询: {payload.query[:50]}...")
-    # ========== [性能监控 - 可删除] ==========
-    
     try:
         ingestion = IngestionService.default()
         results = await ingestion.rag_service.search_context(
@@ -150,20 +130,11 @@ async def search_context(
             SearchResult(**result) for result in results
         ]
         
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] /api/rag/search API 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
-        
         return SearchResponse(
             status="success",
             results=search_results
         )
     except Exception as e:
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] /api/rag/search API 失败，总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
@@ -181,23 +152,9 @@ async def ingest_file(
     
     接收 PDF 文件，提取文本后切分并存入 MongoDB Atlas Vector Search。
     """
-    # ========== [性能监控 - 可删除] ==========
-    api_start_time = time.time()
-    print(f"⏱️ [性能监控] /api/rag/ingest/file API 开始执行，文件名: {file.filename}")
-    # ========== [性能监控 - 可删除] ==========
-    
     try:
-        # ========== [性能监控 - 可删除] ==========
-        read_start_time = time.time()
-        # ========== [性能监控 - 可删除] ==========
-        
         # 读取文件内容
         content = await file.read()
-        
-        # ========== [性能监控 - 可删除] ==========
-        read_elapsed = time.time() - read_start_time
-        print(f"⏱️ [性能监控] /api/rag/ingest/file - 读取文件耗时: {read_elapsed:.2f} 秒，文件大小: {len(content)} bytes")
-        # ========== [性能监控 - 可删除] ==========
         
         # 验证文件类型（可选，但建议添加）
         if not file.filename or not file.filename.lower().endswith('.pdf'):
@@ -213,11 +170,6 @@ async def ingest_file(
             user_id=x_user_id,
         )
         
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] /api/rag/ingest/file API 总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
-        
         return IngestResponse(
             status="success",
             chunks_count=chunks_count
@@ -225,10 +177,6 @@ async def ingest_file(
     except HTTPException:
         raise
     except Exception as e:
-        # ========== [性能监控 - 可删除] ==========
-        total_elapsed = time.time() - api_start_time
-        print(f"⏱️ [性能监控] /api/rag/ingest/file API 失败，总耗时: {total_elapsed:.2f} 秒")
-        # ========== [性能监控 - 可删除] ==========
         traceback.print_exc()
         raise HTTPException(
             status_code=500,

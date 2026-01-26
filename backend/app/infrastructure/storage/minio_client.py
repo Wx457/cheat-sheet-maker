@@ -1,4 +1,3 @@
-import time
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -10,21 +9,15 @@ from app.core.config import settings
 
 
 class MinIOClient:
-    """MinIO/S3 客户端封装，提供基础存储能力。"""
+    """AWS S3 客户端封装，提供基础存储能力。"""
 
     def __init__(self):
-        is_local_minio = settings.S3_ENDPOINT_URL.startswith("http://")
-        client_kwargs = {
-            "endpoint_url": settings.S3_ENDPOINT_URL,
-            "aws_access_key_id": settings.AWS_ACCESS_KEY_ID,
-            "aws_secret_access_key": settings.AWS_SECRET_ACCESS_KEY,
-            "region_name": "us-east-1",
-        }
-        if is_local_minio:
-            client_kwargs["use_ssl"] = False
-            client_kwargs["verify"] = False
-
-        self.s3_client = boto3.client("s3", **client_kwargs)
+        self.s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_REGION,
+        )
         self.bucket_name = settings.S3_BUCKET_NAME
 
     def ensure_bucket(self) -> bool:
@@ -35,16 +28,19 @@ class MinIOClient:
             return True
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
-            if error_code == "404":
+            if error_code == "404" or error_code == "NoSuchBucket":
                 try:
-                    if settings.S3_ENDPOINT_URL.startswith("http://localhost") or settings.S3_ENDPOINT_URL.startswith(
-                        "http://127.0.0.1"
-                    ):
+                    # AWS S3: 需要根据 region 设置 LocationConstraint
+                    # us-east-1 是特殊区域，不需要 LocationConstraint
+                    # 其他区域（如 us-east-2）需要设置 LocationConstraint
+                    if settings.AWS_REGION == "us-east-1":
+                        # us-east-1 不需要 LocationConstraint
                         self.s3_client.create_bucket(Bucket=self.bucket_name)
                     else:
+                        # 其他区域（如 us-east-2）需要 LocationConstraint
                         self.s3_client.create_bucket(
                             Bucket=self.bucket_name,
-                            CreateBucketConfiguration={"LocationConstraint": "us-east-1"},
+                            CreateBucketConfiguration={"LocationConstraint": settings.AWS_REGION},
                         )
                     print(f"✅ 已创建 Bucket '{self.bucket_name}'")
                     return True
@@ -58,8 +54,7 @@ class MinIOClient:
             return False
 
     def upload_file(self, file_data: bytes, filename: str) -> Optional[str]:
-        """上传文件到 MinIO/S3。"""
-        upload_start_time = time.time()
+        """上传文件到 S3。"""
         try:
             timestamp = datetime.utcnow().strftime("%Y%m%d")
             unique_id = str(uuid.uuid4())[:8]
@@ -70,33 +65,22 @@ class MinIOClient:
                 Body=file_data,
                 ContentType="application/pdf",
             )
-            upload_elapsed = time.time() - upload_start_time
-            print(
-                f"⏱️ [性能监控] upload_file - 上传耗时: {upload_elapsed:.2f} 秒，文件大小: {len(file_data)} bytes，file_key: {file_key}"
-            )
             print(f"✅ 文件已上传: {file_key}")
             return file_key
         except (ClientError, BotoCoreError) as exc:
-            upload_elapsed = time.time() - upload_start_time
-            print(f"⏱️ [性能监控] upload_file - 上传失败，耗时: {upload_elapsed:.2f} 秒")
             print(f"❌ 上传文件失败: {exc}")
             return None
 
     def get_presigned_url(self, file_key: str, expiration: int = 3600) -> Optional[str]:
         """生成预签名下载链接。"""
-        url_start_time = time.time()
         try:
             url = self.s3_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self.bucket_name, "Key": file_key},
                 ExpiresIn=expiration,
             )
-            url_elapsed = time.time() - url_start_time
-            print(f"⏱️ [性能监控] get_presigned_url - 生成预签名 URL 耗时: {url_elapsed:.2f} 秒")
             return url
         except (ClientError, BotoCoreError) as exc:
-            url_elapsed = time.time() - url_start_time
-            print(f"⏱️ [性能监控] get_presigned_url - 生成失败，耗时: {url_elapsed:.2f} 秒")
             print(f"❌ 生成预签名 URL 失败: {exc}")
             return None
 
