@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. Redis 服务 (必须保留，用于消息队列)
+  # 1. Redis 服务
   redis:
     image: redis:alpine
     container_name: cheat-redis
@@ -26,7 +26,9 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - PYTHONUNBUFFERED=1  # 👈 加上这行！强制立即打印日志
+      - PDF_GENERATION_HOST=http://backend:8000
+      - PYTHONDONTWRITEBYTECODE=1
+
     # AWS 的配置：Docker 会自动读取这个文件里的 AWS_ACCESS_KEY 等变量
     env_file:
       - ./backend/.env
@@ -46,7 +48,9 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - PYTHONUNBUFFERED=1  # 👈 加上这行！强制立即打印日志
+      - PDF_GENERATION_HOST=http://backend:8000
+      - PYTHONDONTWRITEBYTECODE=1
+
     env_file:
       - ./backend/.env
     depends_on:

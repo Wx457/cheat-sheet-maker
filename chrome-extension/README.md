@@ -110,7 +110,6 @@ Chrome extension for Cheat Sheet Maker that enables knowledge base building thro
   - The amount of knowledge ingested
   - The selected page limit
   - Please be patient and wait for the process to complete
-- **Backend Service**: Ensure the backend service is running at `http://127.0.0.1:8000` (or `http://localhost:8000`)
 
 ### Technical Details
 
@@ -239,7 +238,6 @@ The extension includes the following icon files:
   - 录入的知识量
   - 选择的页数限制
   - 请耐心等待过程完成
-- **后端服务**：确保后端服务运行在 `http://127.0.0.1:8000`（或 `http://localhost:8000`）
 
 ### 技术细节
 

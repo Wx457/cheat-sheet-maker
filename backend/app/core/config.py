@@ -17,6 +17,7 @@ class Settings:
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     
     # Redis 配置
+    # ========== [上线检查] localhost 作为默认值 - 生产环境应通过环境变量 REDIS_HOST 配置 ==========
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
@@ -29,6 +30,7 @@ class Settings:
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "cheat-sheets")
     
     # PDF 生成配置
+    # ========== [上线检查] localhost 作为默认值 - 生产环境应通过环境变量 PDF_GENERATION_HOST 配置（例如: http://backend:8000 或生产环境地址） ==========
     PDF_GENERATION_HOST: str = os.getenv("PDF_GENERATION_HOST", "http://localhost:8000")  # Worker 进程访问 FastAPI 服务器的地址
     
     @classmethod

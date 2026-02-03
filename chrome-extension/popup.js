@@ -118,7 +118,7 @@ function autoCollapseHeaderIfNeeded() {
 async function syncChunkCountFromServer() {
   try {
     const headers = await getHeaders()
-    const response = await fetch('http://127.0.0.1:8000/api/rag/chunks/count', {
+    const response = await fetch('http://18.189.87.197:8000/api/rag/chunks/count', {
       method: 'GET',
       headers
     })
@@ -191,7 +191,7 @@ async function handleResetKnowledgeBase() {
   btnReset.disabled = true
   try {
     const headers = await getHeaders()
-    const response = await fetch('http://127.0.0.1:8000/api/plugin/reset', {
+    const response = await fetch('http://18.189.87.197:8000/api/plugin/reset', {
       method: 'DELETE',
       headers
     })
@@ -331,7 +331,7 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
   while (attempts < maxAttempts) {
     try {
       const headers = await getHeaders()
-      const response = await fetch(`http://127.0.0.1:8000/api/task/${taskId}`, {
+      const response = await fetch(`http://18.189.87.197:8000/api/task/${taskId}`, {
         method: 'GET',
         headers: headers,
         signal: AbortSignal.timeout(5000)
@@ -404,7 +404,7 @@ async function handleScanPage() {
     const headers = await getHeaders()
     const sourceName = document.getElementById('courseName').value.trim() || title || url
 
-    const response = await fetch('http://127.0.0.1:8000/api/rag/ingest', {
+    const response = await fetch('http://18.189.87.197:8000/api/rag/ingest', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -456,7 +456,7 @@ async function handleSaveText() {
     const headers = await getHeaders()
     const sourceName = document.getElementById('courseName').value.trim() || 'User Paste'
 
-    const response = await fetch('http://127.0.0.1:8000/api/rag/ingest', {
+    const response = await fetch('http://18.189.87.197:8000/api/rag/ingest', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -513,7 +513,7 @@ async function handleUploadPdf() {
     const formData = new FormData()
     formData.append('file', file)
 
-    const response = await fetch('http://127.0.0.1:8000/api/rag/ingest/file', {
+    const response = await fetch('http://18.189.87.197:8000/api/rag/ingest/file', {
       method: 'POST',
       headers: headers,
       body: formData
@@ -574,7 +574,7 @@ async function handleNextGenerate() {
     // 使用 syllabus 作为 raw_text，如果没有则使用通用提示
     const rawText = formData.syllabus || 'Generate outline from knowledge base based on all accumulated data'
 
-    const response = await fetch('http://127.0.0.1:8000/api/outline', {
+    const response = await fetch('http://18.189.87.197:8000/api/outline', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -823,7 +823,7 @@ async function handleConfirmGenerate() {
     }
 
     const headers = await getHeaders()
-    const response = await fetch('http://127.0.0.1:8000/api/plugin/generate-final', {
+    const response = await fetch('http://18.189.87.197:8000/api/plugin/generate-final', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -881,7 +881,7 @@ async function handleConfirmGenerate() {
     }
     const pdfHeaders = await getHeaders()
     const pdfResponse = await fetch(
-      `http://127.0.0.1:8000/api/plugin/download-cheat-sheet/${currentProjectId}`,
+      `http://18.189.87.197:8000/api/plugin/download-cheat-sheet/${currentProjectId}`,
       {
         method: 'GET',
         headers: pdfHeaders

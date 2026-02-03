@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Cheat Sheet RAG Clipper",
+  "name": "Cheat Sheet Maker - AI Study Assistant",
   "version": "1.0.0",
-  "description": "将网页内容保存到 RAG 知识库",
+  "description": "Transform your study materials into beautiful, personalized cheat sheets. Scan GPT conversations, paste text, or upload PDFs to build your knowledge base and generate exam-ready study guides instantly.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -12,8 +12,9 @@
   "action": {
     "default_icon": {
       "16": "icon16.png",
+      "32": "icon32.png",
       "48": "icon48.png",
-      "128": "icon120.png"
+      "128": "icon128.png"
     }
   },
   "side_panel": {
@@ -29,6 +30,7 @@
     }
   ],
   "host_permissions": [
+    "http://18.189.87.197:8000/*", 
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*"
   ]
