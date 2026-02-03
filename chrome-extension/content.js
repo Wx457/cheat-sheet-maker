@@ -4,11 +4,10 @@
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================================
-// 核心逻辑：精准定位滚动条 -> 边滚边抓 -> 去重
+// 精准定位滚动条 -> 边滚边抓 -> 去重
 // ============================================================
 async function scrollAndCollect() {
-  // 1. 【关键修复】使用你发现的 data-scroll-root 属性精准定位
-  const scrollableDiv = document.querySelector('[data-scroll-root="true"]');
+  const scrollableDiv = document.querySelector('[data-scroll-root]');
 
   if (!scrollableDiv) {
     console.error("Still cannot find data-scroll-root container, unable to auto-scroll!");

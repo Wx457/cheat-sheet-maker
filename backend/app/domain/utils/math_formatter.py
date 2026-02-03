@@ -13,5 +13,7 @@ def normalize_equation(content: str) -> str:
     if content.startswith("$") and content.endswith("$"):
         return "$$" + content[1:-1] + "$$"
 
+    content = content.replace("\n", " ")
+
     return f"$${content}$$"
 

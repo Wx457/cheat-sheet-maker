@@ -43,7 +43,7 @@ async def generate_pdf_via_browser(data_json: Dict[str, Any]) -> bytes:
             try:
                 await page.wait_for_selector("#render-complete", state="attached", timeout=10000)
             except Exception as exc:  # noqa: PERF203
-                print(f"⚠️ 警告: 未检测到渲染完成标记 (#render-complete)，继续生成 PDF: {exc}")
+                print(f"⚠️ Warning: Render completion marker (#render-complete) not detected, continuing PDF generation: {exc}")
 
             await page.wait_for_timeout(1000)
 

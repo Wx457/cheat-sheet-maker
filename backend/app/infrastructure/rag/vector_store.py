@@ -159,13 +159,13 @@ class VectorStore:
         # 使用 metadata.user_id 路径匹配新的数据结构
         result = self.collection.delete_many({"metadata.user_id": {"$eq": user_id}})
         deleted_count = result.deleted_count
-        print(f"✅ 已删除用户 {user_id} 的向量数据 {deleted_count} 条")
+        print(f"✅ Deleted User {user_id} {deleted_count} chunks")
         return deleted_count
 
     def clear_vector_data(self) -> int:
         result = self.collection.delete_many({})
         deleted_count = result.deleted_count
-        print(f"✅ 已清理 {deleted_count} 条旧向量数据")
+        print(f"✅ Cleared {deleted_count} old chunks")
         return deleted_count
 
     def close(self):

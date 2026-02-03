@@ -36,11 +36,12 @@ async def generate_outline_task(
     Returns:
         任务结果
     """
+
     try:
         exam_type_enum = ExamType(exam_type)
         
         if not user_id:
-            print(f"⚠️ [WARNING] generate_outline_task - 未提供 user_id，RAG 检索将被跳过")
+            print(f"⚠️ [WARNING] generate_outline_task - user_id not provided, RAG retrieval will be skipped")
         
         service = CheatSheetService.default()
         result = await service.generate_outline(text=raw_text, context=user_context, exam_type=exam_type_enum, user_id=user_id)
@@ -83,6 +84,7 @@ async def generate_cheat_sheet_task(
     Returns:
         任务结果（包含 file_key 和 project_id）
     """
+
     try:
         # 提取元数据（如果存在）
         metadata = kwargs.pop("_metadata", None)
@@ -154,7 +156,8 @@ class WorkerSettings:
 
 async def startup(ctx):
     """Worker 启动时执行"""
-    print("🚀 ARQ Worker 启动...")
+
+    print("🚀 ARQ Worker launching...")
     # 触发依赖初始化（如存储桶检查）
     _ = CheatSheetService.default()
     from app.infrastructure.storage.minio_client import get_minio_client
@@ -163,7 +166,7 @@ async def startup(ctx):
 
 async def shutdown(ctx):
     """Worker 关闭时执行"""
-    print("👋 ARQ Worker 关闭...")
+    print("👋 ARQ Worker closing...")
 
 
 # 如果直接运行此文件，启动 Worker

@@ -22,7 +22,7 @@ from app.infrastructure.storage.minio_client import MinIOClient, get_minio_clien
 
 @dataclass
 class CheatSheetService:
-    """Application Layer: 小抄/大纲生成编排服务（用例级工作流）。"""
+    """Application Layer: Cheat sheet/outline generation orchestration service (use case-level workflow)"""
 
     gemini: GeminiClient
     rag_service: VectorStore
@@ -38,36 +38,35 @@ class CheatSheetService:
 
     async def generate_outline(self, text: str, context: Optional[str] = None, exam_type: ExamType = ExamType.final, user_id: Optional[str] = None) -> OutlineResponse:
         """
-        生成大纲（优化版：添加 RAG 检索支持）。
+        Generate outline (RAG retrieval supported)
         
         Args:
-            text: 用户输入的文本（如 syllabus）
-            context: 用户背景信息（如课程名称）
-            exam_type: 考试类型
-            user_id: 用户 ID（用于 RAG 检索时的数据隔离）
+            text: User input text (e.g. syllabus)
+            context: User background information (e.g. course name)
+            exam_type: Exam type
+            user_id: User ID (for data isolation during RAG retrieval)
         """
         cleaned_text = clean_raw_text(text)
         cleaned_context = clean_raw_text(context) if context else None
         
-        # RAG 检索：从向量库检索相关内容
+        # RAG retrieval: retrieve relevant content from vector database
         rag_context_str = ""
+
         if user_id:
-            # 使用 text 作为查询（通常是 syllabus 或课程描述）
-            query = cleaned_text[:200] if len(cleaned_text) > 200 else cleaned_text
-            
+            query = cleaned_text
             results = await self.rag_service.search_context(query, user_id=user_id, k=10)
             
             if results:
                 rag_context_str = "\n--- RAG Context from Vector Database ---\n"
                 for r in results:
                     rag_context_str += f"Source: {r['source']}\n"
-                    rag_context_str += f"Content: {r['content'][:300]}...\n"  # 限制长度用于日志
+                    rag_context_str += f"Content: {r['content']}...\n"
                     rag_context_str += "---------------------------------------\n"
-        
-        # 合并用户背景信息和 RAG 上下文
-        combined_context = cleaned_context or ""
-        if rag_context_str:
-            combined_context += "\n\n" + rag_context_str if combined_context else rag_context_str
+        else:
+            raise ValueError("user_id is required for RAG retrieval")
+
+        combined_context = (cleaned_context or "") + ("\n\n" + rag_context_str if rag_context_str else "")
+
         
         prompt = CheatSheetPrompts.render_outline_prompt(cleaned_text, combined_context if combined_context else None, exam_type)
 
@@ -127,6 +126,7 @@ class CheatSheetService:
 
         # 2) RAG context
         rag_context_str = ""
+
         if request_data.selected_topics:
             import asyncio
 
@@ -135,6 +135,8 @@ class CheatSheetService:
                 for topic in request_data.selected_topics
             ]
             all_results = await asyncio.gather(*search_tasks)
+            
+            
             seen = set()
             for topic, results in zip(request_data.selected_topics, all_results):
                 if results:
@@ -150,7 +152,10 @@ class CheatSheetService:
         else:
             archetype = request_data.archetype.value if request_data.archetype else "general"
             query = request_data.user_context or archetype or "general knowledge"
+            
             results = await self.rag_service.search_context(query, user_id=user_id, k=10)
+            
+            
             if results:
                 rag_context_str += "\n--- General Knowledge Base Context ---\n"
                 for r in results:
@@ -167,7 +172,7 @@ class CheatSheetService:
             cleaned_syllabus = clean_raw_text(request_data.syllabus)
             syllabus_instruction = f"""
 [Syllabus Filter Instruction]
-用户提供了以下考试大纲作为内容过滤指南：
+User provided the following syllabus as content filtering guide:
 {cleaned_syllabus}
 [End of Syllabus Filter Instruction]
 """
@@ -213,7 +218,7 @@ class CheatSheetService:
         filename = f"{safe_title}_{timestamp}.pdf"
         file_key = self.storage_client.upload_file(pdf_bytes, filename)
         if not file_key:
-            raise ValueError("PDF 上传到 S3 失败")
+            raise ValueError("Failed to upload PDF to AWS S3")
 
         # 9) save record
         project_id = self._save_project_if_needed(cheat_sheet, metadata)

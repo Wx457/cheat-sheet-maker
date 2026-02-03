@@ -66,14 +66,14 @@ class TaskResponse(BaseModel):
     """任务提交响应"""
     task_id: str
     status: str = "pending"
-    message: str = "任务已提交，正在处理中"
+    message: str = "Task submitted, processing..."
 
 
 @router.post("/api/plugin/analyze", response_model=TaskResponse)
 async def plugin_analyze(
     request: Request,
     payload: PluginAnalyzeRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+    x_user_id: str = Header(..., alias="X-User-ID", description="User ID (required for data isolation)")
 ) -> TaskResponse:
     """
     Chrome 插件：抓取 + 分析接口
@@ -92,7 +92,7 @@ async def plugin_analyze(
             user_id=x_user_id,
         )
         
-        print(f"✅ 已保存 {chunks_count} 个切片到向量库")
+        print(f"✅ Saved {chunks_count} chunks to vector database")
         
         # Step 2: 检索相关上下文
         # 注意：刚保存的内容已经进入向量库，可以立即检索到
@@ -124,11 +124,11 @@ async def plugin_analyze(
             analysis_text = rag_context_str
             if payload.syllabus:
                 # 如果有 syllabus，在上下文中强调考纲要求
-                analysis_text = f"考试大纲要求：\n{payload.syllabus}\n\n" + rag_context_str
+                analysis_text = f"Syllabus Requirements:\n{payload.syllabus}\n\n" + rag_context_str
         else:
             # 如果没有检索到上下文，使用原始内容摘要
             analysis_text = payload.content[:2000]
-            print("⚠️ 未检索到 RAG 上下文，使用原始内容摘要")
+            print("⚠️ No RAG context found, using original content summary")
         
         # 将生成大纲任务推送到 ARQ 队列（传递 user_id 用于数据隔离）
         arq_pool = request.app.state.arq_pool
@@ -144,7 +144,7 @@ async def plugin_analyze(
         return TaskResponse(
             task_id=job.job_id,
             status="pending",
-            message="分析任务已提交，正在生成主题列表"
+            message="Topic list generating..."
         )
         
     except ValueError as e:
@@ -153,7 +153,7 @@ async def plugin_analyze(
         if "配额" in error_msg or "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
             raise _create_error_response(
                 error_type="QUOTA_EXCEEDED",
-                message="API 配额已用尽，请稍后重试",
+                message="API quota exceeded, please try again later",
                 retry_after=60,
                 details=error_msg,
                 status_code=429
@@ -161,7 +161,7 @@ async def plugin_analyze(
         elif "超时" in error_msg or "timeout" in error_msg.lower():
             raise _create_error_response(
                 error_type="REQUEST_TIMEOUT",
-                message="请求超时，请稍后重试",
+                message="Request timeout, please try again later",
                 retry_after=30,
                 details=error_msg,
                 status_code=408
@@ -169,7 +169,7 @@ async def plugin_analyze(
         elif "服务" in error_msg or "service" in error_msg.lower() or "unavailable" in error_msg.lower():
             raise _create_error_response(
                 error_type="SERVICE_UNAVAILABLE",
-                message="服务暂时不可用，请稍后重试",
+                message="Service temporarily unavailable, please try again later",
                 retry_after=60,
                 details=error_msg,
                 status_code=503
@@ -177,7 +177,7 @@ async def plugin_analyze(
         else:
             raise _create_error_response(
                 error_type="VALIDATION_ERROR",
-                message="输入验证失败",
+                message="Validation failed",
                 details=error_msg,
                 status_code=400
             )
@@ -185,7 +185,7 @@ async def plugin_analyze(
         traceback.print_exc()
         raise _create_error_response(
             error_type="INTERNAL_ERROR",
-            message="分析过程中发生未知错误",
+            message="Unknown error occurred during analysis",
             details=str(e),
             status_code=500
         )
@@ -279,7 +279,7 @@ async def plugin_generate_final(
         traceback.print_exc()
         raise _create_error_response(
             error_type="INTERNAL_ERROR",
-            message="生成过程中发生未知错误",
+            message="Unknown error occurred during generation",
             details=str(e),
             status_code=500
         )
@@ -325,7 +325,7 @@ async def get_project(project_id: str) -> CheatSheetSchema:
         traceback.print_exc()
         raise _create_error_response(
             error_type="INTERNAL_ERROR",
-            message="获取项目数据失败",
+            message="Failed to get project data",
             details=str(e),
             status_code=500
         )
@@ -398,7 +398,7 @@ async def download_cheat_sheet(project_id: str) -> Response:
         traceback.print_exc()
         raise _create_error_response(
             error_type="PDF_GENERATION_ERROR",
-            message="生成 PDF 失败",
+            message="Failed to generate PDF",
             details=str(e),
             status_code=500
         )
@@ -419,7 +419,7 @@ async def reset_knowledge_base(
         traceback.print_exc()
         raise _create_error_response(
             error_type="RESET_FAILED",
-            message="重置知识库失败",
+            message="Failed to reset knowledge base",
             details=str(e),
             status_code=500
         )

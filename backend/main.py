@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     arq_pool = await create_pool(redis_settings)
     app.state.arq_pool = arq_pool
     
-    print("✅ ARQ Redis 连接池已创建")
+    print("✅ ARQ Redis connection pool created")
 
     # 启动时：创建 MongoDB TTL 索引（幂等）
     setup_mongodb_ttl_indexes()
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     
     # 关闭时：清理连接池
     await arq_pool.close(close_connection_pool=True)
-    print("👋 ARQ Redis 连接池已关闭")
+    print("👋 ARQ Redis connection pool closed")
 
 
 app = FastAPI(
@@ -90,10 +90,10 @@ def setup_mongodb_ttl_indexes() -> None:
             expireAfterSeconds=VECTORS_TTL_SECONDS,
         )
 
-        print("✅ MongoDB TTL 索引检查/创建完成")
+        print("✅ MongoDB TTL indexes checked/created")
     except Exception as exc:
         # 记录错误，但不阻止应用启动
-        print(f"⚠️ 创建 MongoDB TTL 索引时出错: {exc}")
+        print(f"⚠️ Error creating MongoDB TTL indexes: {exc}")
     finally:
         try:
             if client:
@@ -113,11 +113,11 @@ if static_dir.exists():
     assets_dir = static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-        print(f"✅ Assets 目录已挂载: {assets_dir}")
+        print(f"✅ Assets directory mounted: {assets_dir}")
     
-    print(f"✅ 静态文件已挂载: {static_dir}")
+    print(f"✅ Static files mounted: {static_dir}")
 else:
-    print(f"⚠️ 警告: 静态文件目录不存在: {static_dir}，PDF 生成功能可能无法正常工作")
+    print(f"⚠️ Warning: Static files directory does not exist: {static_dir}, PDF generation may not work properly")
 
 
 @app.get("/health")

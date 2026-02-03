@@ -24,42 +24,43 @@ class CheatSheetPrompts:
 
         system_prompt = f"""You are a strict Exam Syllabus Analyzer. Your task is to extract exam topics from the provided text.
 
-GLOBAL CONSTRAINTS:
-1. **Relevance**: Ignore chitchat. Focus ONLY on academic concepts, formulas, theorems, and proofs.
-2. **Scoring**: Assign a relevance_score (0.0-1.0) to each topic based on frequency and importance.
-3. **Sorting**: Sort topics by relevance_score descending.
+            GLOBAL CONSTRAINTS:
+            1. **Relevance**: Ignore chitchat. Focus ONLY on academic concepts, formulas, theorems, and proofs.
+            2. **Scoring**: Assign a relevance_score (0.0-1.0) to each topic based on frequency and importance.
+            3. **Sorting**: Sort topics by relevance_score descending.
+            4. **Language**: Use English.
 
-STRICT QUANTITY CONTROL (CRITICAL):
-You MUST output a JSON list containing **between {min_t} and {max_t} topics**.
+            STRICT QUANTITY CONTROL (CRITICAL):
+            You MUST output a JSON list containing **between {min_t} and {max_t} topics**.
 
-**STRATEGY TO MEET QUOTA:**
-- **IF you find > {max_t} topics**: You MUST **MERGE** specific sub-topics into broader "Parent Topics". (e.g., merge "Dot Product" and "Cross Product" into "Vector Operations").
-- **IF you find < {min_t} topics**: You MUST **SPLIT** broad topics into specific sub-components.
-- **VIOLATION**: Returning more than {max_t} or fewer than {min_t} topics is considered a SYSTEM FAILURE.
+            **STRATEGY TO MEET QUOTA:**
+            - **IF you find > {max_t} topics**: You MUST **MERGE** specific sub-topics into broader "Parent Topics". (e.g., merge "Dot Product" and "Cross Product" into "Vector Operations").
+            - **IF you find < {min_t} topics**: You MUST **SPLIT** broad topics into specific sub-components.
+            - **VIOLATION**: Returning more than {max_t} or fewer than {min_t} topics is considered a SYSTEM FAILURE.
 
-SCOPE: {scope_desc}
+            SCOPE: {scope_desc}
 
-【OUTPUT FORMAT】
-Return ONLY raw JSON. No Markdown. No comments.
-Structure:
-{{
-    "topics": [
-        {{"title": "Broad Concept A", "relevance_score": 0.95}},
-        {{"title": "Broad Concept B", "relevance_score": 0.88}}
-    ]
-}}
+            【OUTPUT FORMAT】
+            Return ONLY raw JSON. No Markdown. No comments.
+            Structure:
+            {{
+                "topics": [
+                    {{"title": "Broad Concept A", "relevance_score": 0.95}},
+                    {{"title": "Broad Concept B", "relevance_score": 0.88}}
+                ]
+            }}
 
-IMPORTANT: Double-escape backslashes in LaTeX strings (e.g., \\\\sigma).
-"""
+            IMPORTANT: Double-escape backslashes in LaTeX strings (e.g., \\\\sigma).
+            """
 
-        user_input = f"对话记录：\n{cleaned_text}\n\n"
+        user_input = f"Conversation Record:\n{cleaned_text}\n\n"
         if cleaned_context:
             # 如果包含 RAG 上下文，明确标注
             if "--- RAG Context from Vector Database ---" in cleaned_context:
-                user_input += f"[RAG Context - 优先使用以下内容]\n{cleaned_context}\n[End of RAG Context]\n\n"
-                user_input += "重要提示：优先从上述 RAG Context 中提取主题，这些内容来自向量数据库，是课程的实际内容。\n\n"
+                user_input += f"[RAG Context - Primary Source]\n{cleaned_context}\n[End of RAG Context]\n\n"
+                user_input += "Prioritize extracting topics from the above RAG Context, which comes from the vector database and is the actual content of the course.\n\n"
             else:
-                user_input += f"用户背景信息：\n{cleaned_context}\n\n"
+                user_input += f"User Background Information:\n{cleaned_context}\n\n"
         return f"{system_prompt}\n\n{user_input}"
 
     @staticmethod
@@ -75,11 +76,11 @@ IMPORTANT: Double-escape backslashes in LaTeX strings (e.g., \\\\sigma).
         selected_topics_str: str,
     ) -> str:
         return f"""Context: This cheat sheet is for a {exam_type_context}.
-你是一个智能复习资料生成引擎。你的任务是根据向量数据库中的内容和用户提供的[选定主题]，生成一份高密度的 Cheat Sheet。
+You are an intelligent cheat sheet generation engine. Your task is to generate a high-density Cheat Sheet based on the content in the vector database and the [selected topics] provided by the user.
 
-[RAG Context - 唯一内容来源]
-以下内容来自向量数据库，这是生成小抄的唯一内容来源。请优先使用这些内容：
-{rag_context_str if rag_context_str else "（向量数据库中暂无相关内容）"}
+[RAG Context - Primary Source]
+The following content comes from the vector database, which is the primary source of content for generating the cheat sheet. Please prioritize using this content:
+{rag_context_str if rag_context_str else "(No relevant content in the vector database)"}
 [End of RAG Context]
 {syllabus_instruction}
 
@@ -147,18 +148,18 @@ Prioritize listing core formulas first, derivation/proof steps second, then use 
 ]
 }}
 
-对于数学公式，必须使用 LaTeX 格式（例如 \\\\int x dx）。
+For mathematical formulas, you must use LaTeX format (e.g. \\\\int x dx).
 
 IMPORTANT: JSON String Escaping. You must double-escape all backslashes in LaTeX. For example, output \\\\sigma instead of \\sigma, and \\\\( instead of \\(. Ensure the output is valid parsable JSON.
 
-不要返回任何 Markdown 标记，直接返回纯 JSON 对象。
+Do not return any Markdown tags, return pure JSON objects. All content must be in English.
 
 [User Metadata]
-选定主题列表：
+Selected Topics List:
 {selected_topics_str}
-页面限制：{page_limit}
-学术水平：{academic_level}
-课程类型：{archetype}
+Page Limit: {page_limit}
+Academic Level: {academic_level}
+Course Type: {archetype}
 [End of User Metadata]
 """
 

@@ -9,7 +9,7 @@ from app.core.config import settings
 
 
 class MinIOClient:
-    """AWS S3 客户端封装，提供基础存储能力。"""
+    """AWS S3 client wrapper"""
 
     def __init__(self):
         self.s3_client = boto3.client(
@@ -21,10 +21,10 @@ class MinIOClient:
         self.bucket_name = settings.S3_BUCKET_NAME
 
     def ensure_bucket(self) -> bool:
-        """检查 Bucket 是否存在，不存在则创建。"""
+        """Check if Bucket exists, create if not."""
         try:
             self.s3_client.head_bucket(Bucket=self.bucket_name)
-            print(f"✅ Bucket '{self.bucket_name}' 已存在")
+            print(f"✅ Bucket '{self.bucket_name}' already exists")
             return True
         except ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
@@ -42,19 +42,19 @@ class MinIOClient:
                             Bucket=self.bucket_name,
                             CreateBucketConfiguration={"LocationConstraint": settings.AWS_REGION},
                         )
-                    print(f"✅ 已创建 Bucket '{self.bucket_name}'")
+                    print(f"✅ Bucket Created '{self.bucket_name}'")
                     return True
                 except ClientError as create_error:
-                    print(f"❌ 创建 Bucket 失败: {create_error}")
+                    print(f"❌ Failed to create Bucket: {create_error}")
                     return False
-            print(f"❌ 检查 Bucket 时发生错误: {exc}")
+            print(f"❌ Error checking Bucket: {exc}")
             return False
         except BotoCoreError as exc:
-            print(f"❌ Boto3 连接错误: {exc}")
+            print(f"❌ Boto3 connection error: {exc}")
             return False
 
     def upload_file(self, file_data: bytes, filename: str) -> Optional[str]:
-        """上传文件到 S3。"""
+        """Upload file to S3."""
         try:
             timestamp = datetime.utcnow().strftime("%Y%m%d")
             unique_id = str(uuid.uuid4())[:8]
@@ -65,14 +65,14 @@ class MinIOClient:
                 Body=file_data,
                 ContentType="application/pdf",
             )
-            print(f"✅ 文件已上传: {file_key}")
+            print(f"✅ File uploaded: {file_key}")
             return file_key
         except (ClientError, BotoCoreError) as exc:
-            print(f"❌ 上传文件失败: {exc}")
+            print(f"❌ Failed to upload file: {exc}")
             return None
 
     def get_presigned_url(self, file_key: str, expiration: int = 3600) -> Optional[str]:
-        """生成预签名下载链接。"""
+        """Generate presigned download URL."""
         try:
             url = self.s3_client.generate_presigned_url(
                 "get_object",
@@ -81,7 +81,7 @@ class MinIOClient:
             )
             return url
         except (ClientError, BotoCoreError) as exc:
-            print(f"❌ 生成预签名 URL 失败: {exc}")
+            print(f"❌ Failed to generate presigned URL: {exc}")
             return None
 
 
@@ -89,7 +89,7 @@ _minio_client: Optional["MinIOClient"] = None
 
 
 def get_minio_client() -> "MinIOClient":
-    """获取 MinIOClient 单例，并确保 bucket 存在。"""
+    """Get MinIOClient singleton and ensure bucket exists."""
     global _minio_client
     if _minio_client is None:
         _minio_client = MinIOClient()

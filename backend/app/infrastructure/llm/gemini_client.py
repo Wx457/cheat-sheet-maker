@@ -36,8 +36,8 @@ def _exponential_backoff_retry(func: Callable[[], Any]) -> Any:
             if not _is_retryable_error(exc) or attempt == MAX_RETRIES - 1:
                 raise
             delay = min(INITIAL_RETRY_DELAY * (2 ** attempt), MAX_RETRY_DELAY)
-            print(f"⚠️ Gemini 调用失败 (尝试 {attempt + 1}/{MAX_RETRIES}): {exc}")
-            print(f"⏳ 等待 {delay} 秒后重试...")
+            print(f"⚠️ Gemini API call failed (attempt {attempt + 1}/{MAX_RETRIES}): {exc}")
+            print(f"⏳ Waiting {delay} seconds before retry...")
             time.sleep(delay)
     raise last_exception  # 理论上不会到达
 
