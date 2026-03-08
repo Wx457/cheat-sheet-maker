@@ -1,10 +1,12 @@
 import asyncio
 import io
+import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from pymongo import MongoClient
+from pymongo import errors as pymongo_errors
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -12,6 +14,9 @@ from langchain_mongodb import MongoDBAtlasVectorSearch
 
 from app.core.config import settings
 from app.infrastructure.llm.openai_client import OpenAIClient
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class VectorStore:
@@ -30,6 +35,43 @@ class VectorStore:
 
         # 优化分块策略：较小块大小适合学术密度内容
         self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        self.mongo_retry_attempts = 4
+        self.mongo_retry_base_delay_seconds = 0.5
+        not_primary_error = getattr(pymongo_errors, "NotPrimaryError", pymongo_errors.AutoReconnect)
+        not_primary_no_secondary_ok = getattr(
+            pymongo_errors, "NotPrimaryNoSecondaryOk", pymongo_errors.AutoReconnect
+        )
+        self.retryable_errors = (
+            pymongo_errors.AutoReconnect,
+            pymongo_errors.ServerSelectionTimeoutError,
+            pymongo_errors.ConnectionFailure,
+            pymongo_errors.NetworkTimeout,
+            not_primary_error,
+            not_primary_no_secondary_ok,
+        )
+
+    def _run_with_retry(self, operation_name: str, operation: Callable[[], T]) -> T:
+        """
+        对 Mongo 读写进行短暂重试，缓解副本集主从切换导致的瞬时失败。
+        """
+        for attempt in range(1, self.mongo_retry_attempts + 1):
+            try:
+                return operation()
+            except self.retryable_errors as exc:
+                is_last_attempt = attempt == self.mongo_retry_attempts
+                if is_last_attempt:
+                    logger.exception("Mongo operation failed after retries: %s", operation_name)
+                    raise
+                sleep_seconds = self.mongo_retry_base_delay_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "Mongo transient error on %s (attempt %d/%d): %s; retry in %.1fs",
+                    operation_name,
+                    attempt,
+                    self.mongo_retry_attempts,
+                    exc,
+                    sleep_seconds,
+                )
+                time.sleep(sleep_seconds)
 
     def _get_vector_store(self) -> MongoDBAtlasVectorSearch:
         # 指定 text_key 为 page_content，因为我们存储的文档使用 page_content 字段而不是默认的 text 字段
@@ -99,7 +141,11 @@ class VectorStore:
 
         # 6. 批量插入 MongoDB
         if documents_to_insert:
-            await asyncio.to_thread(self.collection.insert_many, documents_to_insert)
+            await asyncio.to_thread(
+                self._run_with_retry,
+                "insert_many",
+                lambda: self.collection.insert_many(documents_to_insert),
+            )
 
         return len(documents_to_insert)
 
@@ -136,7 +182,11 @@ class VectorStore:
         pre_filter = {"metadata.user_id": {"$eq": user_id}}
         search_kwargs = {"k": k, "fetch_k": fetch_k, "lambda_mult": 0.5, "pre_filter": pre_filter}
 
-        results = await asyncio.to_thread(vector_store.max_marginal_relevance_search, query, **search_kwargs)
+        results = await asyncio.to_thread(
+            self._run_with_retry,
+            "max_marginal_relevance_search",
+            lambda: vector_store.max_marginal_relevance_search(query, **search_kwargs),
+        )
 
         return [{"content": doc.page_content, "source": doc.metadata.get("source", "unknown"), "score": 0.0} for doc in results]
 
@@ -145,25 +195,35 @@ class VectorStore:
         # 使用 metadata.user_id 路径匹配新的数据结构
         pre_filter = {"metadata.user_id": {"$eq": user_id}}
 
-        results = await asyncio.to_thread(vector_store.similarity_search_with_score, query, k=k, pre_filter=pre_filter)
+        results = await asyncio.to_thread(
+            self._run_with_retry,
+            "similarity_search_with_score",
+            lambda: vector_store.similarity_search_with_score(query, k=k, pre_filter=pre_filter),
+        )
 
         return [{"content": doc.page_content, "source": doc.metadata.get("source", "unknown"), "score": float(score)} for doc, score in results]
 
     def get_user_chunk_count(self, user_id: str) -> int:
         """获取指定用户的 chunks 数量。"""
         # 使用 metadata.user_id 路径匹配新的数据结构
-        count = self.collection.count_documents({"metadata.user_id": {"$eq": user_id}})
+        count = self._run_with_retry(
+            "count_documents",
+            lambda: self.collection.count_documents({"metadata.user_id": {"$eq": user_id}}),
+        )
         return count
 
     def delete_user_data(self, user_id: str) -> int:
         # 使用 metadata.user_id 路径匹配新的数据结构
-        result = self.collection.delete_many({"metadata.user_id": {"$eq": user_id}})
+        result = self._run_with_retry(
+            "delete_user_data",
+            lambda: self.collection.delete_many({"metadata.user_id": {"$eq": user_id}}),
+        )
         deleted_count = result.deleted_count
         print(f"✅ Deleted User {user_id} {deleted_count} chunks")
         return deleted_count
 
     def clear_vector_data(self) -> int:
-        result = self.collection.delete_many({})
+        result = self._run_with_retry("clear_vector_data", lambda: self.collection.delete_many({}))
         deleted_count = result.deleted_count
         print(f"✅ Cleared {deleted_count} old chunks")
         return deleted_count

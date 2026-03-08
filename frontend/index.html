@@ -3,36 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cheat Sheet Maker</title>
+    <title>AI Cheat Sheet Generator</title>
     <!-- 纯静态展示页：Tailwind CDN，不依赖 React/Vite 构建 -->
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body class="min-h-screen bg-slate-950 text-slate-50">
     <div class="mx-auto max-w-5xl px-6 py-12">
-      <div class="flex items-start justify-between gap-6">
+      <div class="relative">
+        <button
+          id="langToggle"
+          class="absolute right-0 top-0 inline-flex items-center rounded-xl bg-slate-800/60 px-4 py-2 text-sm font-semibold text-slate-200 ring-1 ring-slate-700 hover:bg-slate-800"
+          onclick="toggleLanguage()"
+        >
+          <span id="langText">EN</span>
+        </button>
         <div>
-          <div class="inline-flex items-center gap-2 rounded-full bg-slate-800/60 px-3 py-1 text-xs text-slate-200 ring-1 ring-slate-700">
+          <div class="inline-flex items-center gap-2 rounded-full bg-slate-800/60 px-3 py-1 text-xs ring-1 ring-slate-700" style="color: #ffffff;">
             <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-            Demo（纯静态 HTML + Tailwind）
+            <span data-zh="Demo" data-en="Demo" style="color: #ffffff;">Demo</span>
           </div>
-          <h1 class="mt-4 text-3xl font-bold tracking-tight">Cheat Sheet Maker</h1>
-          <p class="mt-2 max-w-2xl text-slate-300">
+          <h1 class="mt-4 text-3xl font-bold tracking-tight" data-zh="AI Cheat Sheet Generator" data-en="AI Cheat Sheet Generator" style="color: #ffffff;">AI Cheat Sheet Generator</h1>
+          <p class="mt-2 max-w-2xl" data-zh="从网页/PDF/粘贴内容摄入知识库，通过 RAG 检索 + LLM 生成考试大纲与小抄，并自动渲染为 PDF。" data-en="Ingest content from web pages/PDFs/pasted text into a knowledge base, generate exam outlines and cheat sheets through RAG retrieval + LLM, and automatically render as PDF." style="color: #ffffff;">
             从网页/PDF/粘贴内容摄入知识库，通过 RAG 检索 + LLM 生成考试大纲与小抄，并自动渲染为 PDF。
           </p>
         </div>
-        <a
-          class="hidden sm:inline-flex items-center rounded-xl bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-white"
-          href="#"
-          onclick="return false;"
-        >
-          查看演示
-        </a>
       </div>
 
       <div class="mt-10 grid gap-6 lg:grid-cols-3">
-        <div class="rounded-2xl bg-slate-900/60 p-6 ring-1 ring-slate-800">
-          <h2 class="text-sm font-semibold text-slate-200">1) 摄入</h2>
-          <p class="mt-2 text-sm text-slate-300">
+        <div class="rounded-2xl p-6 ring-1 ring-slate-800" style="background-color: rgba(162, 89, 255, 1);">
+          <h2 class="text-sm font-semibold" data-zh="1) 摄入" data-en="1) Ingest" style="color: #000000;">1) 摄入</h2>
+          <p class="mt-2 text-sm" data-zh="扫描网页 / 粘贴文本 / 上传 PDF，写入向量库（按用户隔离）。" data-en="Scan web pages / paste text / upload PDFs, write to vector database (isolated by user)." style="color: #000000;">
             扫描网页 / 粘贴文本 / 上传 PDF，写入向量库（按用户隔离）。
           </p>
           <div class="mt-4 rounded-xl bg-slate-950 p-4 text-xs text-slate-300 ring-1 ring-slate-800">
@@ -41,9 +41,9 @@
           </div>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/60 p-6 ring-1 ring-slate-800">
-          <h2 class="text-sm font-semibold text-slate-200">2) 生成大纲</h2>
-          <p class="mt-2 text-sm text-slate-300">
+        <div class="rounded-2xl p-6 ring-1 ring-slate-800" style="background-color: rgba(242, 78, 30, 1);">
+          <h2 class="text-sm font-semibold" data-zh="2) 生成大纲" data-en="2) Generate Outline" style="color: #000000;">2) 生成大纲</h2>
+          <p class="mt-2 text-sm" data-zh="使用 syllabus / 课程信息作为 query，结合 RAG 上下文提取考试主题列表。" data-en="Use syllabus / course information as query, extract exam topic list with RAG context." style="color: #000000;">
             使用 syllabus / 课程信息作为 query，结合 RAG 上下文提取考试主题列表。
           </p>
           <div class="mt-4 flex items-center justify-between rounded-xl bg-slate-950 p-4 text-xs text-slate-300 ring-1 ring-slate-800">
@@ -52,9 +52,9 @@
           </div>
         </div>
 
-        <div class="rounded-2xl bg-slate-900/60 p-6 ring-1 ring-slate-800">
-          <h2 class="text-sm font-semibold text-slate-200">3) 生成 PDF 小抄</h2>
-          <p class="mt-2 text-sm text-slate-300">
+        <div class="rounded-2xl p-6 ring-1 ring-slate-800" style="background-color: rgba(52, 211, 153, 1);">
+          <h2 class="text-sm font-semibold" data-zh="3) 生成 PDF 小抄" data-en="3) Generate PDF Cheat Sheet" style="color: #000000;">3) 生成 PDF 小抄</h2>
+          <p class="mt-2 text-sm" data-zh="选主题后生成结构化 JSON，Headless 渲染为 HTML，Playwright 打印为 PDF。" data-en="After selecting topics, generate structured JSON, render to HTML with Headless, print to PDF with Playwright." style="color: #000000;">
             选主题后生成结构化 JSON，Headless 渲染为 HTML，Playwright 打印为 PDF。
           </p>
           <div class="mt-4 rounded-xl bg-slate-950 p-4 text-xs text-slate-300 ring-1 ring-slate-800">
@@ -66,13 +66,48 @@
         </div>
       </div>
 
-      <div class="mt-10 rounded-2xl bg-slate-900/60 p-6 ring-1 ring-slate-800">
-        <h2 class="text-sm font-semibold text-slate-200">说明</h2>
-        <ul class="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-300">
-          <li>此页面为纯静态展示用，不依赖后端/扩展，可直接给面试官演示产品形态。</li>
-          <li>Headless Renderer 仍由 React 的 <code class="rounded bg-slate-800 px-1 py-0.5">#/print</code> 路由负责。</li>
-        </ul>
+      <div class="mt-10 flex items-center justify-center gap-6">
+        <a
+          class="inline-flex items-center justify-center rounded-xl bg-slate-50 px-8 py-6 text-lg font-semibold text-slate-900 hover:bg-white"
+          href="https://www.youtube.com/watch?v=2dKr7PnRBxY"
+          target="_blank"
+          style="flex: 0 0 33%; max-width: 33%;"
+          data-zh="查看演示"
+          data-en="Watch Demo"
+        >
+          查看演示
+        </a>
+        <a
+          class="inline-flex items-center justify-center rounded-xl px-8 py-6 text-lg font-semibold text-slate-900 hover:opacity-90"
+          style="background-color: #0ABAB5; flex: 0 0 33%; max-width: 33%;"
+          href="#"
+          onclick="return false;"
+          data-zh="安装插件"
+          data-en="Install Extension"
+        >
+          安装插件
+        </a>
       </div>
     </div>
+    <script>
+      let currentLang = 'zh';
+      
+      function toggleLanguage() {
+        currentLang = currentLang === 'zh' ? 'en' : 'zh';
+        updateLanguage();
+      }
+      
+      function updateLanguage() {
+        const elements = document.querySelectorAll('[data-zh][data-en]');
+        elements.forEach(el => {
+          el.textContent = el.getAttribute(`data-${currentLang}`);
+        });
+        
+        const langText = document.getElementById('langText');
+        langText.textContent = currentLang === 'zh' ? 'EN' : '中';
+        
+        document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+      }
+    </script>
   </body>
 </html>

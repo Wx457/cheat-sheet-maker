@@ -2,9 +2,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Final
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pymongo import MongoClient
 
 from arq.connections import create_pool, RedisSettings
@@ -107,6 +108,11 @@ static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     # 挂载根目录，用于访问 index.html
     app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
+    # 3. 👇 新增：根路径路由 (这就是我们要加的！)
+    @app.get("/")
+    async def read_root():
+        # 直接读取并返回 index.html 文件
+        return FileResponse(static_dir / "index.html")
     
     # 挂载 assets 目录，用于访问 JS/CSS 等资源文件
     # Vite 构建的 HTML 中资源路径是 /assets/xxx，所以需要单独挂载
@@ -122,7 +128,39 @@ else:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    checks: dict[str, str] = {"api": "ok"}
+    degraded = False
+
+    mongo_client = None
+    try:
+        mongo_client = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=2000)
+        mongo_client.admin.command("ping")
+        checks["mongodb"] = "ok"
+    except Exception as exc:
+        degraded = True
+        checks["mongodb"] = f"error: {exc}"
+    finally:
+        try:
+            if mongo_client:
+                mongo_client.close()
+        except Exception:
+            pass
+
+    try:
+        arq_pool = app.state.arq_pool
+        await arq_pool.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        degraded = True
+        checks["redis"] = f"error: {exc}"
+
+    if degraded:
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "degraded", "checks": checks},
+        )
+
+    return {"status": "ok", "checks": checks}
 
 
 if __name__ == "__main__":

@@ -22,6 +22,10 @@ class Settings:
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+
+    # RAG 检索重试配置（处理向量索引最终一致性延迟）
+    RAG_RETRY_ATTEMPTS: int = int(os.getenv("RAG_RETRY_ATTEMPTS", "5"))
+    RAG_RETRY_DELAY_SECONDS: int = int(os.getenv("RAG_RETRY_DELAY_SECONDS", "3"))
     
     # AWS S3 配置
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")

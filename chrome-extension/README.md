@@ -126,9 +126,9 @@ Chrome extension for Cheat Sheet Maker that enables knowledge base building thro
 ### Icon Files
 
 The extension includes the following icon files:
-- `icon16.png` (16x16) - Toolbar icon
+- `icon16.png`, `icon32.png` (16x16, 32x32) - Toolbar icons
 - `icon48.png` (48x48) - Extension management page
-- `icon120.png` (120x120) - Chrome Web Store (if published)
+- `icon128.png` (128x128) - Chrome Web Store (if published)
 
 ---
 
@@ -254,6 +254,6 @@ The extension includes the following icon files:
 ### 图标文件
 
 扩展包含以下图标文件：
-- `icon16.png` (16x16) - 工具栏图标
+- `icon16.png`、`icon32.png` (16x16, 32x32) - 工具栏图标
 - `icon48.png` (48x48) - 扩展管理页面
-- `icon120.png` (120x120) - Chrome 网上应用店（如果发布）
+- `icon128.png` (128x128) - Chrome 网上应用店（如果发布）

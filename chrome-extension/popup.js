@@ -7,6 +7,9 @@ let extendedTopics = []
 window.extendedTopics = extendedTopics
 let chunkCount = 0
 
+// 从 config.js 读取 API 基地址（带兜底，避免配置脚本缺失导致运行中断）
+const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
+
 // ========== [数据隔离] 用户 ID 管理 ==========
 async function getOrCreateUserId() {
   return new Promise((resolve, reject) => {
@@ -53,6 +56,162 @@ async function getHeadersForFile() {
   }
 }
 // ========== [数据隔离] 用户 ID 管理结束 ==========
+
+// ========== 统一错误提示 ==========
+let noticeTimerId = null
+
+function showNotice(message, type = 'error', autoHideMs = 6000) {
+  if (!message) return
+  let notice = document.getElementById('runtime-notice')
+  if (!notice) {
+    notice = document.createElement('div')
+    notice.id = 'runtime-notice'
+    notice.style.position = 'fixed'
+    notice.style.top = '10px'
+    notice.style.left = '10px'
+    notice.style.right = '10px'
+    notice.style.padding = '8px 10px'
+    notice.style.borderRadius = '8px'
+    notice.style.fontSize = '12px'
+    notice.style.lineHeight = '1.4'
+    notice.style.zIndex = '9999'
+    notice.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)'
+    document.body.appendChild(notice)
+  }
+
+  const styleMap = {
+    error: { background: '#fee2e2', border: '#fecaca', color: '#991b1b' },
+    warning: { background: '#fff7ed', border: '#fed7aa', color: '#9a3412' },
+    success: { background: '#dcfce7', border: '#86efac', color: '#166534' }
+  }
+  const style = styleMap[type] || styleMap.error
+  notice.style.backgroundColor = style.background
+  notice.style.border = `1px solid ${style.border}`
+  notice.style.color = style.color
+  notice.textContent = message
+  notice.style.display = 'block'
+
+  if (noticeTimerId) {
+    clearTimeout(noticeTimerId)
+    noticeTimerId = null
+  }
+  if (autoHideMs > 0) {
+    noticeTimerId = setTimeout(() => {
+      const n = document.getElementById('runtime-notice')
+      if (n) n.style.display = 'none'
+    }, autoHideMs)
+  }
+}
+
+async function parseErrorMessage(response, fallbackMessage) {
+  const fallback = `${fallbackMessage} (HTTP ${response.status})`
+  const errorData = await response.json().catch(() => null)
+  if (!errorData) return fallback
+
+  const detail = errorData.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (detail && typeof detail.message === 'string' && detail.message.trim()) return detail.message
+  if (typeof errorData.message === 'string' && errorData.message.trim()) return errorData.message
+  if (typeof errorData.error === 'string' && errorData.error.trim()) return errorData.error
+  return fallback
+}
+
+function showConfirmDialog(title, message, confirmText = 'Confirm', cancelText = 'Cancel') {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('runtime-confirm-overlay')
+    if (existing) existing.remove()
+
+    const overlay = document.createElement('div')
+    overlay.id = 'runtime-confirm-overlay'
+    overlay.style.position = 'fixed'
+    overlay.style.inset = '0'
+    overlay.style.background = 'rgba(15, 23, 42, 0.45)'
+    overlay.style.zIndex = '10000'
+    overlay.style.display = 'flex'
+    overlay.style.alignItems = 'center'
+    overlay.style.justifyContent = 'center'
+    overlay.style.padding = '12px'
+
+    const dialog = document.createElement('div')
+    dialog.style.width = '100%'
+    dialog.style.maxWidth = '360px'
+    dialog.style.background = '#ffffff'
+    dialog.style.border = '1px solid #e5e7eb'
+    dialog.style.borderRadius = '10px'
+    dialog.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.2)'
+    dialog.style.padding = '14px'
+
+    const titleEl = document.createElement('div')
+    titleEl.textContent = title
+    titleEl.style.fontSize = '14px'
+    titleEl.style.fontWeight = '700'
+    titleEl.style.color = '#0f172a'
+    titleEl.style.marginBottom = '8px'
+
+    const messageEl = document.createElement('div')
+    messageEl.textContent = message
+    messageEl.style.fontSize = '12px'
+    messageEl.style.lineHeight = '1.5'
+    messageEl.style.color = '#334155'
+    messageEl.style.marginBottom = '12px'
+
+    const actions = document.createElement('div')
+    actions.style.display = 'flex'
+    actions.style.justifyContent = 'flex-end'
+    actions.style.gap = '8px'
+
+    const cancelBtn = document.createElement('button')
+    cancelBtn.textContent = cancelText
+    cancelBtn.style.border = '1px solid #cbd5e1'
+    cancelBtn.style.background = '#ffffff'
+    cancelBtn.style.color = '#334155'
+    cancelBtn.style.borderRadius = '8px'
+    cancelBtn.style.padding = '6px 10px'
+    cancelBtn.style.fontSize = '12px'
+    cancelBtn.style.cursor = 'pointer'
+
+    const confirmBtn = document.createElement('button')
+    confirmBtn.textContent = confirmText
+    confirmBtn.style.border = 'none'
+    confirmBtn.style.background = '#ef4444'
+    confirmBtn.style.color = '#ffffff'
+    confirmBtn.style.borderRadius = '8px'
+    confirmBtn.style.padding = '6px 10px'
+    confirmBtn.style.fontSize = '12px'
+    confirmBtn.style.fontWeight = '600'
+    confirmBtn.style.cursor = 'pointer'
+
+    let resolved = false
+    const cleanup = (result) => {
+      if (resolved) return
+      resolved = true
+      document.removeEventListener('keydown', onKeyDown)
+      overlay.remove()
+      resolve(result)
+    }
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') cleanup(false)
+      if (event.key === 'Enter') cleanup(true)
+    }
+    document.addEventListener('keydown', onKeyDown)
+
+    cancelBtn.addEventListener('click', () => cleanup(false))
+    confirmBtn.addEventListener('click', () => cleanup(true))
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) cleanup(false)
+    })
+
+    actions.appendChild(cancelBtn)
+    actions.appendChild(confirmBtn)
+    dialog.appendChild(titleEl)
+    dialog.appendChild(messageEl)
+    dialog.appendChild(actions)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+    confirmBtn.focus()
+  })
+}
 
 // 获取页面元素
 const viewForm = document.getElementById('view-form')
@@ -118,7 +277,7 @@ function autoCollapseHeaderIfNeeded() {
 async function syncChunkCountFromServer() {
   try {
     const headers = await getHeaders()
-    const response = await fetch('http://18.189.87.197:8000/api/rag/chunks/count', {
+    const response = await fetch(`${API_BASE_URL}/api/rag/chunks/count`, {
       method: 'GET',
       headers
     })
@@ -133,9 +292,12 @@ async function syncChunkCountFromServer() {
         console.log(`✅ 已从服务器同步 chunks 数量: ${chunkCount}`)
       }
     } else {
+      const msg = await parseErrorMessage(response, '无法从服务器同步 chunks 数量')
+      showNotice(`${msg}，当前显示本地缓存。`, 'warning', 4500)
       console.warn('⚠️ 无法从服务器获取 chunks 数量，使用本地缓存值')
     }
   } catch (error) {
+    showNotice('同步 chunks 数量失败，当前显示本地缓存。', 'warning', 4500)
     console.warn('⚠️ 同步 chunks 数量失败，使用本地缓存值:', error)
   }
 }
@@ -186,19 +348,23 @@ function setHeaderCollapsed(collapsed) {
 // 知识库重置
 async function handleResetKnowledgeBase() {
   if (!btnReset) return
-  const confirmed = window.confirm('Are you sure you want to clear the entire knowledge base? This cannot be undone.')
+  const confirmed = await showConfirmDialog(
+    'Clear knowledge base?',
+    'Are you sure you want to clear the entire knowledge base? This cannot be undone.',
+    'Clear',
+    'Cancel'
+  )
   if (!confirmed) return
   btnReset.disabled = true
   try {
     const headers = await getHeaders()
-    const response = await fetch('http://18.189.87.197:8000/api/plugin/reset', {
+    const response = await fetch(`${API_BASE_URL}/api/plugin/reset`, {
       method: 'DELETE',
       headers
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      const msg = errorData.detail?.message || errorData.detail || 'Reset failed'
+      const msg = await parseErrorMessage(response, 'Failed to reset knowledge base')
       throw new Error(msg)
     }
 
@@ -207,9 +373,10 @@ async function handleResetKnowledgeBase() {
     updateChunkCounter()
     persistChunkCount()
     setHeaderCollapsed(false) // 清空后自动展开表单，便于重新填写
-    window.alert('Knowledge base cleared!')
+    showNotice('Knowledge base cleared!', 'success', 2200)
     console.log('Reset result', data)
   } catch (error) {
+    showNotice(`Reset failed: ${error.message || error}`, 'error', 7000)
     console.error('Reset failed:', error)
   } finally {
     btnReset.disabled = false
@@ -331,7 +498,7 @@ async function pollTaskStatus(taskId, maxAttempts = 60, interval = 2000, expectT
   while (attempts < maxAttempts) {
     try {
       const headers = await getHeaders()
-      const response = await fetch(`http://18.189.87.197:8000/api/task/${taskId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/task/${taskId}`, {
         method: 'GET',
         headers: headers,
         signal: AbortSignal.timeout(5000)
@@ -404,7 +571,7 @@ async function handleScanPage() {
     const headers = await getHeaders()
     const sourceName = document.getElementById('courseName').value.trim() || title || url
 
-    const response = await fetch('http://18.189.87.197:8000/api/rag/ingest', {
+    const response = await fetch(`${API_BASE_URL}/api/rag/ingest`, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -414,8 +581,7 @@ async function handleScanPage() {
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || 'Save failed')
+      throw new Error(await parseErrorMessage(response, 'Save failed'))
     }
 
     const data = await response.json()
@@ -431,6 +597,7 @@ async function handleScanPage() {
       throw new Error('Save failed')
     }
   } catch (error) {
+    showNotice(`Scan failed: ${error.message || error}`, 'error', 7000)
     console.error('Scan failed:', error)
   } finally {
     if (btnScanPage) {
@@ -456,7 +623,7 @@ async function handleSaveText() {
     const headers = await getHeaders()
     const sourceName = document.getElementById('courseName').value.trim() || 'User Paste'
 
-    const response = await fetch('http://18.189.87.197:8000/api/rag/ingest', {
+    const response = await fetch(`${API_BASE_URL}/api/rag/ingest`, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -466,8 +633,7 @@ async function handleSaveText() {
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || 'Save failed')
+      throw new Error(await parseErrorMessage(response, 'Save failed'))
     }
 
     const data = await response.json()
@@ -484,6 +650,7 @@ async function handleSaveText() {
       throw new Error('Save failed')
     }
   } catch (error) {
+    showNotice(`Save failed: ${error.message || error}`, 'error', 7000)
     console.error('Save failed:', error)
   } finally {
     btnSaveText.disabled = false
@@ -513,15 +680,14 @@ async function handleUploadPdf() {
     const formData = new FormData()
     formData.append('file', file)
 
-    const response = await fetch('http://18.189.87.197:8000/api/rag/ingest/file', {
+    const response = await fetch(`${API_BASE_URL}/api/rag/ingest/file`, {
       method: 'POST',
       headers: headers,
       body: formData
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || 'Upload failed')
+      throw new Error(await parseErrorMessage(response, 'Upload failed'))
     }
 
     const data = await response.json()
@@ -538,6 +704,7 @@ async function handleUploadPdf() {
       throw new Error('Upload failed')
     }
   } catch (error) {
+    showNotice(`Upload failed: ${error.message || error}`, 'error', 7000)
     console.error('Upload failed:', error)
   } finally {
     btnUploadPdf.disabled = false
@@ -574,7 +741,7 @@ async function handleNextGenerate() {
     // 使用 syllabus 作为 raw_text，如果没有则使用通用提示
     const rawText = formData.syllabus || 'Generate outline from knowledge base based on all accumulated data'
 
-    const response = await fetch('http://18.189.87.197:8000/api/outline', {
+    const response = await fetch(`${API_BASE_URL}/api/outline`, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -823,7 +990,7 @@ async function handleConfirmGenerate() {
     }
 
     const headers = await getHeaders()
-    const response = await fetch('http://18.189.87.197:8000/api/plugin/generate-final', {
+    const response = await fetch(`${API_BASE_URL}/api/plugin/generate-final`, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -881,7 +1048,7 @@ async function handleConfirmGenerate() {
     }
     const pdfHeaders = await getHeaders()
     const pdfResponse = await fetch(
-      `http://18.189.87.197:8000/api/plugin/download-cheat-sheet/${currentProjectId}`,
+      `${API_BASE_URL}/api/plugin/download-cheat-sheet/${currentProjectId}`,
       {
         method: 'GET',
         headers: pdfHeaders
@@ -1045,8 +1212,13 @@ chrome.storage.local.get(['chunk_count'], async (result) => {
 })
 buildHeaderSummary()
 
-// 注意：formPersistence.js 的初始化在 popup.html 的 script 标签中处理
-// 这样可以确保所有 DOM 元素和全局变量都已准备好
+// 在 popup.js 中初始化 formPersistence，避免 popup.html 内联脚本触发 CSP 报错
+if (typeof formPersistence !== 'undefined' && formPersistence.init) {
+  formPersistence.init().catch((error) => {
+    showNotice(`Form init failed: ${error.message || error}`, 'error', 7000)
+    console.error('Form persistence init failed:', error)
+  })
+}
 
 // Header Accordion：点击“编辑/摘要”展开
 if (headerSummary) {

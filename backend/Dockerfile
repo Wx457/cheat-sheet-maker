@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 安装 Playwright 浏览器内核 (用于生成 PDF)
 RUN playwright install chromium
-RUN playwright install-deps
+RUN playwright install-deps chromium
 
 RUN pip install watchfiles
 

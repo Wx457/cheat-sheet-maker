@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pymongo import MongoClient
 
@@ -18,6 +20,8 @@ from app.domain.utils.cleaner import clean_raw_text, repair_json_string, densify
 from app.infrastructure.pdf.renderer import generate_pdf_via_browser
 from app.infrastructure.rag.vector_store import VectorStore, get_vector_store
 from app.infrastructure.storage.minio_client import MinIOClient, get_minio_client
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,6 +39,51 @@ class CheatSheetService:
             rag_service=get_vector_store(),
             storage_client=get_minio_client(),
         )
+
+    async def _search_context_with_retry(self, query: str, user_id: str, k: int = 10) -> List[dict]:
+        """
+        Polling retry for eventual consistency of Atlas vector index.
+        If no chunks found, wait and retry without blocking event loop.
+        """
+        max_attempts = settings.RAG_RETRY_ATTEMPTS
+        delay_seconds = settings.RAG_RETRY_DELAY_SECONDS
+
+        for attempt in range(1, max_attempts + 1):
+            logger.info(
+                "RAG retrieval attempt %d/%d for user_id=%s",
+                attempt,
+                max_attempts,
+                user_id,
+            )
+
+            results = await self.rag_service.search_context(query, user_id=user_id, k=k)
+
+            if results:
+                logger.info(
+                    "RAG retrieval succeeded on attempt %d/%d, chunks=%d, user_id=%s",
+                    attempt,
+                    max_attempts,
+                    len(results),
+                    user_id,
+                )
+                return results
+
+            logger.warning(
+                "RAG retrieval returned 0 chunks on attempt %d/%d for user_id=%s",
+                attempt,
+                max_attempts,
+                user_id,
+            )
+
+            if attempt < max_attempts:
+                await asyncio.sleep(delay_seconds)
+
+        logger.warning(
+            "RAG retrieval exhausted retries after %d attempts, still 0 chunks, user_id=%s",
+            max_attempts,
+            user_id,
+        )
+        return []
 
     async def generate_outline(self, text: str, context: Optional[str] = None, exam_type: ExamType = ExamType.final, user_id: Optional[str] = None) -> OutlineResponse:
         """
@@ -54,7 +103,7 @@ class CheatSheetService:
 
         if user_id:
             query = cleaned_text
-            results = await self.rag_service.search_context(query, user_id=user_id, k=10)
+            results = await self._search_context_with_retry(query, user_id=user_id, k=10)
             
             if results:
                 rag_context_str = "\n--- RAG Context from Vector Database ---\n"

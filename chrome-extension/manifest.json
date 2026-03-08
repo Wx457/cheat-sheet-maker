@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Cheat Sheet Maker - AI Study Assistant",
-  "version": "1.0.0",
-  "description": "Transform your study materials into beautiful, personalized cheat sheets. Scan GPT conversations, paste text, or upload PDFs to build your knowledge base and generate exam-ready study guides instantly.",
+  "name": "AI Cheat Sheet Generator",
+  "version": "1.0.3",
+  "description": "Instantly turn GPT chats, text, and PDFs into beautiful, exam-ready cheat sheets with AI.",
   "permissions": [
     "activeTab",
-    "scripting",
     "storage",
     "sidePanel"
   ],
