@@ -348,6 +348,10 @@ User Request
 - During replica set elections/upgrades, brief `NoPrimary`/selection timeouts are expected.
 - App-level mitigation: retry with exponential backoff in vector store operations (insert/search/count/delete).
 - Outline-generation-specific mitigation: when Atlas vector indexing is not finished and retrieval returns 0 chunks, service retries polling via `_search_context_with_retry()` before giving up.
+- Batch-ID gating:
+  - Each ingest writes `metadata.ingest_batch_id`.
+  - Frontend stores `lastIngestBatchId` and sends it to `/api/outline`.
+  - Outline waits for that batch to become searchable; timeout degrades with reason.
 - Operational recommendation:
   1. run topology changes in maintenance window
   2. restart backend/worker after major topology upgrades
