@@ -285,10 +285,10 @@ User Request
 
 ### Chrome Extension
 - **Manifest**: Version 3
-- **Permissions**: activeTab, scripting
+- **Permissions**: activeTab, storage, sidePanel
 - **Functionality**: Web page content scraping and sending
 
-## ⚡ Performance Optimizations
+## ⚡ Performance & Reliability
 
 ### 1. Parallel MMR Retrieval + Deduplication
 - **Location**: `backend/app/application/services/cheat_sheet_service.py` - `create_cheat_sheet_flow()` function
@@ -334,6 +334,36 @@ User Request
 - `REDIS_PORT` - Redis port (default: `6379`)
 - `REDIS_DB` - Redis database number (default: `0`)
 - `REDIS_PASSWORD` - Redis password (optional)
+- `RAG_RETRY_ATTEMPTS` - Outline retrieval retry attempts when vector index is not yet queryable (default: `5`)
+- `RAG_RETRY_DELAY_SECONDS` - Delay between retries for eventual consistency window (default: `3`)
+
+## 🚀 Production Operations Practices
+
+### Health and Recovery
+- `backend/main.py` `/health` checks both MongoDB and Redis/ARQ; dependency failure returns `503`.
+- `docker-compose.yml` uses health checks + `depends_on: condition: service_healthy` to enforce startup order.
+- Services use `restart: unless-stopped` for auto-recovery instead of routine manual restarts.
+
+### MongoDB Topology Changes
+- During replica set elections/upgrades, brief `NoPrimary`/selection timeouts are expected.
+- App-level mitigation: retry with exponential backoff in vector store operations (insert/search/count/delete).
+- Outline-generation-specific mitigation: when Atlas vector indexing is not finished and retrieval returns 0 chunks, service retries polling via `_search_context_with_retry()` before giving up.
+- Operational recommendation:
+  1. run topology changes in maintenance window
+  2. restart backend/worker after major topology upgrades
+  3. verify `/health` and core APIs (`/api/rag/chunks/count`, `/api/plugin/reset`, `/api/rag/ingest`)
+
+### Container Process Hygiene (PID 1 / Zombie Reaping)
+- `docker-compose.yml` sets `init: true` for both `backend` and `worker`.
+- This inserts a minimal init process as PID 1 to reap orphan/zombie child processes, preventing process-table growth and memory pressure during long-running operation.
+
+### Incident Triage Signals
+- Key symptoms: `/health` becomes `503`, repeated Mongo transient warnings, 5xx spike on ingest/reset/count.
+- Suggested triage flow:
+  1. check `/health`
+  2. inspect backend logs (Mongo/Redis)
+  3. verify Atlas primary status and network access
+  4. re-test key APIs before reopening traffic
 
 ## 📋 Key Files
 

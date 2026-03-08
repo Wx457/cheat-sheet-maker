@@ -57,7 +57,7 @@ You can use any combination of the following methods:
 **Method B: Paste Text**
 1. Click the extension icon
 2. Paste your text into the text area
-3. Click "Paste & Add to KB"
+3. Click "Save & Add to KB"
 
 **Method C: Upload PDF**
 1. Click the extension icon
@@ -182,7 +182,7 @@ You can use any combination of the following methods:
 **方式 B：粘贴文本**
 1. 点击插件图标
 2. 将文本粘贴到文本区域
-3. 点击"粘贴并添加到知识库"
+3. 点击"Save & Add to KB"
 
 **方式 C：上传 PDF**
 1. 点击插件图标
@@ -297,7 +297,7 @@ You can use any combination of the following methods:
 
 #### Chrome Extension
 - **Manifest**: Version 3
-- **Permissions**: activeTab, scripting
+- **Permissions**: activeTab, storage, sidePanel
 - **Features**: Web page content scraping, automatic scrolling for long conversations
 
 ### Performance Optimizations
