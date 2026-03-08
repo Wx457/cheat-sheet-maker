@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+from datetime import datetime
 from typing import Optional
 from bson import ObjectId
 from fastapi import APIRouter, Body, HTTPException, Request, Header
@@ -67,6 +68,9 @@ class TaskResponse(BaseModel):
     task_id: str
     status: str = "pending"
     message: str = "Task submitted, processing..."
+    chunks_count: Optional[int] = None
+    ingest_batch_id: Optional[str] = None
+    ingest_at: Optional[datetime] = None
 
 
 @router.post("/api/plugin/analyze", response_model=TaskResponse)
@@ -86,13 +90,13 @@ async def plugin_analyze(
     try:
         ingestion = IngestionService.default()
 
-        chunks_count = await ingestion.process_text(
+        ingest_result = await ingestion.process_text(
             text=payload.content,
             metadata={"course_name": payload.course_name, "url": payload.url, "source": payload.course_name or payload.url},
             user_id=x_user_id,
         )
         
-        print(f"✅ Saved {chunks_count} chunks to vector database")
+        print(f"✅ Saved {ingest_result['chunks_count']} chunks to vector database")
         
         # Step 2: 检索相关上下文
         # 注意：刚保存的内容已经进入向量库，可以立即检索到
@@ -144,7 +148,10 @@ async def plugin_analyze(
         return TaskResponse(
             task_id=job.job_id,
             status="pending",
-            message="Topic list generating..."
+            message="Topic list generating...",
+            chunks_count=ingest_result["chunks_count"],
+            ingest_batch_id=ingest_result["ingest_batch_id"],
+            ingest_at=ingest_result["ingest_at"],
         )
         
     except ValueError as e:

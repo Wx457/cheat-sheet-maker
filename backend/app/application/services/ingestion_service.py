@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from app.domain.utils.cleaner import clean_raw_text
-from app.infrastructure.rag.vector_store import VectorStore, get_vector_store
+from app.infrastructure.rag.vector_store import IngestResult, VectorStore, get_vector_store
 
 
 @dataclass
@@ -22,7 +22,7 @@ class IngestionService:
     def default(cls) -> "IngestionService":
         return cls(rag_service=get_vector_store())
 
-    async def process_text(self, text: str, metadata: Optional[Dict[str, Any]], user_id: str) -> int:
+    async def process_text(self, text: str, metadata: Optional[Dict[str, Any]], user_id: str) -> IngestResult:
         """
         清洗文本并写入向量库（优化版：批量嵌入 + 上下文增强）。
 
@@ -38,7 +38,7 @@ class IngestionService:
 
     async def process_file(
         self, file_content: bytes, filename: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
-    ) -> int:
+    ) -> IngestResult:
         """
         摄入 PDF 文件到向量库（优化版：支持上下文增强元数据）。
 

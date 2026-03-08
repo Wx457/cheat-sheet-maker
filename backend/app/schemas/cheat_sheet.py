@@ -64,12 +64,14 @@ class TopicInput(BaseModel):
 
 class OutlineResponse(BaseModel):
     topics: List[TopicNode]
+    degraded_reason: Optional[str] = None
 
 
 class GenerateOutlineRequest(BaseModel):
     raw_text: str
     user_context: Optional[str] = None
     exam_type: ExamType = ExamType.final
+    ingest_batch_id: Optional[str] = None
 
 
 class GenerateSheetRequest(BaseModel):

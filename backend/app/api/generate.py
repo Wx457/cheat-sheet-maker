@@ -41,7 +41,8 @@ async def generate_outline(
             raw_text=payload.raw_text,
             user_context=payload.user_context,
             exam_type=payload.exam_type.value if payload.exam_type else "final",
-            user_id=x_user_id
+            user_id=x_user_id,
+            ingest_batch_id=payload.ingest_batch_id,
         )
         
         return TaskResponse(

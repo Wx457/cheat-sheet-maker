@@ -1,4 +1,5 @@
 import traceback
+from datetime import datetime
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
 from pydantic import BaseModel
@@ -19,6 +20,8 @@ class IngestResponse(BaseModel):
     """文本摄入响应模型"""
     status: str
     chunks_count: int
+    ingest_batch_id: str
+    ingest_at: datetime
 
 
 class SearchRequest(BaseModel):
@@ -89,7 +92,7 @@ async def ingest_text(
     """
     try:
         ingestion = IngestionService.default()
-        chunks_count = await ingestion.process_text(
+        ingest_result = await ingestion.process_text(
             text=payload.text,
             metadata={"source": payload.source},
             user_id=x_user_id,
@@ -97,7 +100,9 @@ async def ingest_text(
         
         return IngestResponse(
             status="success",
-            chunks_count=chunks_count
+            chunks_count=ingest_result["chunks_count"],
+            ingest_batch_id=ingest_result["ingest_batch_id"],
+            ingest_at=ingest_result["ingest_at"],
         )
     except Exception as e:
         traceback.print_exc()
@@ -164,7 +169,7 @@ async def ingest_file(
             )
         
         ingestion = IngestionService.default()
-        chunks_count = await ingestion.process_file(
+        ingest_result = await ingestion.process_file(
             file_content=content,
             filename=file.filename or "unknown.pdf",
             user_id=x_user_id,
@@ -172,7 +177,9 @@ async def ingest_file(
         
         return IngestResponse(
             status="success",
-            chunks_count=chunks_count
+            chunks_count=ingest_result["chunks_count"],
+            ingest_batch_id=ingest_result["ingest_batch_id"],
+            ingest_at=ingest_result["ingest_at"],
         )
     except HTTPException:
         raise

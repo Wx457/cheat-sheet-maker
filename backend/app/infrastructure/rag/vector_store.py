@@ -3,7 +3,8 @@ import io
 import logging
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar, TypedDict
+from uuid import uuid4
 
 from pymongo import MongoClient
 from pymongo import errors as pymongo_errors
@@ -17,6 +18,12 @@ from app.infrastructure.llm.openai_client import OpenAIClient
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+
+
+class IngestResult(TypedDict):
+    chunks_count: int
+    ingest_batch_id: str
+    ingest_at: datetime
 
 
 class VectorStore:
@@ -100,7 +107,7 @@ class VectorStore:
 
     async def ingest_text(
         self, raw_text: str, source_name: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
-    ) -> int:
+    ) -> IngestResult:
         """
         摄入文本到向量库（优化版：批量嵌入 + 上下文增强）。
 
@@ -114,13 +121,17 @@ class VectorStore:
         chunks = self.text_splitter.split_text(raw_text)
 
         # 2. 构建元数据
+        ingest_batch_id = uuid4().hex
+        ingest_at = datetime.utcnow()
         full_metadata = {
             "source": source_name,
             "user_id": user_id,
-            "created_at": datetime.utcnow(),
+            "created_at": ingest_at,
         }
         if metadata:
             full_metadata.update(metadata)
+        # 每次摄入强制写入新的批次标识，避免被外部 metadata 覆盖
+        full_metadata["ingest_batch_id"] = ingest_batch_id
 
         # 3. 上下文增强：为嵌入准备增强文本，但保留原始文本用于显示
         texts_to_embed = [self._enrich_chunk_with_context(chunk, full_metadata) for chunk in chunks]
@@ -147,11 +158,15 @@ class VectorStore:
                 lambda: self.collection.insert_many(documents_to_insert),
             )
 
-        return len(documents_to_insert)
+        return {
+            "chunks_count": len(documents_to_insert),
+            "ingest_batch_id": ingest_batch_id,
+            "ingest_at": ingest_at,
+        }
 
     async def ingest_pdf(
         self, file_content: bytes, filename: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
-    ) -> int:
+    ) -> IngestResult:
         """
         摄入 PDF 文件到向量库（优化版：支持上下文增强元数据）。
 
@@ -173,8 +188,8 @@ class VectorStore:
         if metadata:
             pdf_metadata.update(metadata)
 
-        chunks_count = await self.ingest_text(raw_text, source_name=filename, user_id=user_id, metadata=pdf_metadata)
-        return chunks_count
+        ingest_result = await self.ingest_text(raw_text, source_name=filename, user_id=user_id, metadata=pdf_metadata)
+        return ingest_result
 
     async def search_context_mmr(self, query: str, user_id: str, k: int = 3, fetch_k: int = 10) -> List[dict]:
         vector_store = self._get_vector_store()
@@ -202,6 +217,22 @@ class VectorStore:
         )
 
         return [{"content": doc.page_content, "source": doc.metadata.get("source", "unknown"), "score": float(score)} for doc, score in results]
+
+    async def is_batch_searchable(self, query: str, user_id: str, ingest_batch_id: str) -> bool:
+        """
+        检查指定批次是否已可被向量检索命中（用于索引最终一致性等待）。
+        """
+        vector_store = self._get_vector_store()
+        pre_filter = {
+            "metadata.user_id": {"$eq": user_id},
+            "metadata.ingest_batch_id": {"$eq": ingest_batch_id},
+        }
+        results = await asyncio.to_thread(
+            self._run_with_retry,
+            "batch_searchable_check",
+            lambda: vector_store.similarity_search_with_score(query, k=1, pre_filter=pre_filter),
+        )
+        return len(results) > 0
 
     def get_user_chunk_count(self, user_id: str) -> int:
         """获取指定用户的 chunks 数量。"""

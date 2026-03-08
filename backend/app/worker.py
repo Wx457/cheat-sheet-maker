@@ -21,7 +21,8 @@ async def generate_outline_task(
     raw_text: str,
     user_context: str = None,
     exam_type: str = "final",
-    user_id: str = None  # 必需，用于 RAG 检索时的数据隔离
+    user_id: str = None,  # 必需，用于 RAG 检索时的数据隔离
+    ingest_batch_id: str = None,  # 可选，要求等待该批次可检索后再生成大纲
 ) -> Dict[str, Any]:
     """
     ARQ 任务：生成大纲（优化版：支持 RAG 检索）
@@ -44,7 +45,13 @@ async def generate_outline_task(
             print(f"⚠️ [WARNING] generate_outline_task - user_id not provided, RAG retrieval will be skipped")
         
         service = CheatSheetService.default()
-        result = await service.generate_outline(text=raw_text, context=user_context, exam_type=exam_type_enum, user_id=user_id)
+        result = await service.generate_outline(
+            text=raw_text,
+            context=user_context,
+            exam_type=exam_type_enum,
+            user_id=user_id,
+            ingest_batch_id=ingest_batch_id,
+        )
         
         # 返回结果（ARQ 会自动存储）
         return {

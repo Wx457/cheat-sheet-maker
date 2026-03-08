@@ -40,7 +40,13 @@ class CheatSheetService:
             storage_client=get_minio_client(),
         )
 
-    async def _search_context_with_retry(self, query: str, user_id: str, k: int = 10) -> List[dict]:
+    async def _search_context_with_retry(
+        self,
+        query: str,
+        user_id: str,
+        k: int = 10,
+        required_batch_id: Optional[str] = None,
+    ) -> List[dict]:
         """
         Polling retry for eventual consistency of Atlas vector index.
         If no chunks found, wait and retry without blocking event loop.
@@ -49,43 +55,66 @@ class CheatSheetService:
         delay_seconds = settings.RAG_RETRY_DELAY_SECONDS
 
         for attempt in range(1, max_attempts + 1):
-            logger.info(
-                "RAG retrieval attempt %d/%d for user_id=%s",
-                attempt,
-                max_attempts,
-                user_id,
-            )
+            logger.info("RAG retrieval attempt %d/%d for user_id=%s", attempt, max_attempts, user_id)
+
+            if required_batch_id:
+                batch_ready = await self.rag_service.is_batch_searchable(
+                    query=query,
+                    user_id=user_id,
+                    ingest_batch_id=required_batch_id,
+                )
+                if not batch_ready:
+                    logger.warning(
+                        "Required batch not searchable on attempt %d/%d, user_id=%s, required_batch_id=%s",
+                        attempt,
+                        max_attempts,
+                        user_id,
+                        required_batch_id,
+                    )
+                    if attempt < max_attempts:
+                        await asyncio.sleep(delay_seconds)
+                    continue
 
             results = await self.rag_service.search_context(query, user_id=user_id, k=k)
 
             if results:
                 logger.info(
-                    "RAG retrieval succeeded on attempt %d/%d, chunks=%d, user_id=%s",
+                    "RAG retrieval succeeded on attempt %d/%d, chunks=%d, user_id=%s, required_batch_id=%s",
                     attempt,
                     max_attempts,
                     len(results),
                     user_id,
+                    required_batch_id,
                 )
                 return results
 
             logger.warning(
-                "RAG retrieval returned 0 chunks on attempt %d/%d for user_id=%s",
+                "RAG retrieval returned 0 chunks on attempt %d/%d for user_id=%s, required_batch_id=%s",
                 attempt,
                 max_attempts,
                 user_id,
+                required_batch_id,
             )
 
             if attempt < max_attempts:
                 await asyncio.sleep(delay_seconds)
 
         logger.warning(
-            "RAG retrieval exhausted retries after %d attempts, still 0 chunks, user_id=%s",
+            "RAG retrieval exhausted retries after %d attempts, user_id=%s, required_batch_id=%s",
             max_attempts,
             user_id,
+            required_batch_id,
         )
         return []
 
-    async def generate_outline(self, text: str, context: Optional[str] = None, exam_type: ExamType = ExamType.final, user_id: Optional[str] = None) -> OutlineResponse:
+    async def generate_outline(
+        self,
+        text: str,
+        context: Optional[str] = None,
+        exam_type: ExamType = ExamType.final,
+        user_id: Optional[str] = None,
+        ingest_batch_id: Optional[str] = None,
+    ) -> OutlineResponse:
         """
         Generate outline (RAG retrieval supported)
         
@@ -97,13 +126,35 @@ class CheatSheetService:
         """
         cleaned_text = clean_raw_text(text)
         cleaned_context = clean_raw_text(context) if context else None
+        degraded_reason: Optional[str] = None
         
         # RAG retrieval: retrieve relevant content from vector database
         rag_context_str = ""
 
         if user_id:
             query = cleaned_text
-            results = await self._search_context_with_retry(query, user_id=user_id, k=10)
+            results = await self._search_context_with_retry(
+                query=query,
+                user_id=user_id,
+                k=10,
+                required_batch_id=ingest_batch_id,
+            )
+            if ingest_batch_id and not results:
+                degraded_reason = (
+                    f"Batch {ingest_batch_id} was not searchable in retry window; "
+                    "outline generated with currently searchable knowledge."
+                )
+                logger.warning("Outline generation degraded: %s", degraded_reason)
+                # TODO(compat-remove-after-legacy-expiry):
+                # 兼容线上“新旧混合数据”阶段：旧数据没有 metadata.ingest_batch_id。
+                # 当 required_batch_id 未命中时，回退到不带 batch 约束的检索，确保旧数据仍可参与 outline。
+                # 待旧数据全部 TTL 过期后，可移除此回退逻辑，仅保留 batch 约束路径。
+                results = await self._search_context_with_retry(
+                    query=query,
+                    user_id=user_id,
+                    k=10,
+                    required_batch_id=None,
+                )
             
             if results:
                 rag_context_str = "\n--- RAG Context from Vector Database ---\n"
@@ -123,6 +174,8 @@ class CheatSheetService:
 
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
+        if degraded_reason:
+            data["degraded_reason"] = degraded_reason
         return OutlineResponse(**data)
 
     @staticmethod

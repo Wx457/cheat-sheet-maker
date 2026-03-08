@@ -6,6 +6,8 @@ window.currentOutlineData = currentOutlineData
 let extendedTopics = []
 window.extendedTopics = extendedTopics
 let chunkCount = 0
+let lastIngestBatchId = null
+let lastIngestAt = null
 
 // 从 config.js 读取 API 基地址（带兜底，避免配置脚本缺失导致运行中断）
 const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
@@ -316,6 +318,20 @@ function persistChunkCount() {
   }
 }
 
+function persistLastIngestInfo(ingestBatchId, ingestAt) {
+  if (!ingestBatchId) return
+  lastIngestBatchId = ingestBatchId
+  lastIngestAt = ingestAt || null
+  try {
+    chrome.storage.local.set({
+      last_ingest_batch_id: lastIngestBatchId,
+      last_ingest_at: lastIngestAt
+    })
+  } catch (e) {
+    console.error('Failed to save last ingest info', e)
+  }
+}
+
 // Header 折叠与摘要
 let headerCollapsed = false
 
@@ -370,8 +386,11 @@ async function handleResetKnowledgeBase() {
 
     const data = await response.json()
     chunkCount = 0
+    lastIngestBatchId = null
+    lastIngestAt = null
     updateChunkCounter()
     persistChunkCount()
+    chrome.storage.local.remove(['last_ingest_batch_id', 'last_ingest_at'])
     setHeaderCollapsed(false) // 清空后自动展开表单，便于重新填写
     showNotice('Knowledge base cleared!', 'success', 2200)
     console.log('Reset result', data)
@@ -588,6 +607,7 @@ async function handleScanPage() {
     
     if (data.status === 'success') {
       chunkCount += Number(data.chunks_count || 0)
+      persistLastIngestInfo(data.ingest_batch_id, data.ingest_at)
       updateChunkCounter()
       persistChunkCount()
       autoCollapseHeaderIfNeeded()
@@ -640,6 +660,7 @@ async function handleSaveText() {
     
     if (data.status === 'success') {
       chunkCount += Number(data.chunks_count || 0)
+      persistLastIngestInfo(data.ingest_batch_id, data.ingest_at)
       updateChunkCounter()
       persistChunkCount()
       autoCollapseHeaderIfNeeded()
@@ -694,6 +715,7 @@ async function handleUploadPdf() {
     
     if (data.status === 'success') {
       chunkCount += Number(data.chunks_count || 0)
+      persistLastIngestInfo(data.ingest_batch_id, data.ingest_at)
       updateChunkCounter()
       persistChunkCount()
       autoCollapseHeaderIfNeeded()
@@ -747,7 +769,8 @@ async function handleNextGenerate() {
       body: JSON.stringify({
         raw_text: rawText,
         user_context: formData.courseName || null,
-        exam_type: mapExamType(formData.examType)
+        exam_type: mapExamType(formData.examType),
+        ingest_batch_id: lastIngestBatchId || null
       })
     })
 
@@ -768,6 +791,10 @@ async function handleNextGenerate() {
     const result = await pollTaskStatus(taskId)
     
     console.log('Analysis result:', result)
+    if (result?.degraded_reason) {
+      showNotice(`Outline degraded: ${result.degraded_reason}`, 'warning', 7000)
+      console.warn('Outline degraded:', result.degraded_reason)
+    }
     if (!result || !result.topics) {
       throw new Error('Analysis result format error: missing topics field')
     }
@@ -1201,11 +1228,17 @@ if (btnAddCustomTopic && customTopicInput) {
 // 先设置默认视图（如果持久化模块没有恢复视图，则使用默认值）
 showView('form')
 
-// 先从本地存储恢复 chunks 数量，然后从服务器同步最新值
-chrome.storage.local.get(['chunk_count'], async (result) => {
+// 先从本地存储恢复 chunks 数量与最近摄入批次信息，然后从服务器同步最新值
+chrome.storage.local.get(['chunk_count', 'last_ingest_batch_id', 'last_ingest_at'], async (result) => {
   if (typeof result?.chunk_count === 'number') {
     chunkCount = result.chunk_count
     updateChunkCounter()
+  }
+  if (typeof result?.last_ingest_batch_id === 'string' && result.last_ingest_batch_id) {
+    lastIngestBatchId = result.last_ingest_batch_id
+  }
+  if (typeof result?.last_ingest_at === 'string' && result.last_ingest_at) {
+    lastIngestAt = result.last_ingest_at
   }
   // 从服务器同步最新的 chunks 数量（覆盖本地缓存）
   await syncChunkCountFromServer()
