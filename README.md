@@ -45,29 +45,27 @@ Build your knowledge base through multiple methods:
 <a id="user-guide"></a>
 ### 📖 User Guide
 
-## 📖 Getting Started
-
-### 1. Install Extension
+#### 1. Install Extension
 Simply add the extension to your browser via the **[Chrome Web Store](https://chromewebstore.google.com/detail/ai-cheat-sheet-generator/aimjdpkndlippaflppddgknkapfiihbl)**. This ensures you are running the latest production-ready version.
 
-### 2. Build Your Knowledge Base
+#### 2. Build Your Knowledge Base
 Aggregate information using any combination of these high-fidelity ingestion methods:
 - **Smart Web Scan**: Open a GPT chat window and click "Scan & Add to KB." The agent automatically scrolls and captures the full conversation context.
 - **Direct Ingestion**: Paste text directly into the extension for immediate processing.
 - **PDF Extraction**: Upload local PDF files to be parsed and indexed into your local **vector store**.
 
-### 3. Generate Optimized Outlines
+#### 3. Generate Optimized Outlines
 Enter your course details (Name, Syllabus, Exam Type). The system analyzes your entire knowledge base to extract core topics and exam-relevant themes. 
 *Note: Processing time scales with the volume of ingested data.*
 
-### 4. Configure & Generate Cheat Sheet
+#### 4. Configure & Generate Cheat Sheet
 Select your preferred topics and set a page constraint based on your study needs:
 - **1 Side**: Survival mode (Core formulas/definitions only).
 - **1 Page**: Compact derivation mode.
 - **2 Pages**: Comprehensive review mode.
 - **Unlimited**: Detailed study guide with examples.
 
-### 5. Export to PDF
+#### 5. Export to PDF
 Once the **RAG pipeline** completes the generation, click **"Download PDF"** to get a professionally typeset, two-column A4 cheat sheet ready for print.
 
 ---
@@ -100,29 +98,27 @@ Once the **RAG pipeline** completes the generation, click **"Download PDF"** to 
 
 ### 📖 用户指南
 
-## 📖 快速开始
-
-### 1. 安装扩展
+#### 1. 安装扩展
 直接通过 **[Chrome Web Store](https://chromewebstore.google.com/detail/ai-cheat-sheet-generator/aimjdpkndlippaflppddgknkapfiihbl)** 添加扩展，确保你使用的是最新稳定生产版本。
 
-### 2. 构建知识库
+#### 2. 构建知识库
 可任意组合以下高保真知识录入方式：
 - **智能网页扫描**：打开 GPT 聊天窗口，点击「Scan & Add to KB」。系统会自动滚动并捕获完整对话上下文。
 - **直接录入文本**：将文本直接粘贴到扩展中，立即处理。
 - **PDF 提取**：上传本地 PDF 文件，解析并索引到本地 **向量存储（vector store）**。
 
-### 3. 生成优化大纲
+#### 3. 生成优化大纲
 输入课程信息（课程名称、考试大纲、考试类型）。系统会分析整个知识库，提取核心主题与高考试相关内容。  
 *注意：处理时长会随录入数据量增加而增长。*
 
-### 4. 配置并生成速查表
+#### 4. 配置并生成速查表
 选择你需要的主题，并根据学习目标设置页数限制：
 - **1 面**：生存模式（仅保留核心公式/定义）。
 - **1 页**：紧凑推导模式。
 - **2 页**：综合复习模式。
 - **无限制**：详细学习指南（含示例）。
 
-### 5. 导出 PDF
+#### 5. 导出 PDF
 当 **RAG 流程（RAG pipeline）** 完成后，点击 **「Download PDF」**，即可导出为适合打印的专业双栏 A4 速查表。
 
 ---
