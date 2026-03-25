@@ -95,4 +95,3 @@ def get_minio_client() -> "MinIOClient":
         _minio_client = MinIOClient()
         _minio_client.ensure_bucket()
     return _minio_client
-

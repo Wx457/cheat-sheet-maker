@@ -22,7 +22,9 @@ class IngestionService:
     def default(cls) -> "IngestionService":
         return cls(rag_service=get_vector_store())
 
-    async def process_text(self, text: str, metadata: Optional[Dict[str, Any]], user_id: str) -> IngestResult:
+    async def process_text(
+        self, text: str, metadata: Optional[Dict[str, Any]], user_id: str
+    ) -> IngestResult:
         """
         清洗文本并写入向量库（优化版：批量嵌入 + 上下文增强）。
 
@@ -31,13 +33,24 @@ class IngestionService:
             metadata: 可选元数据（如 source/course/url 等），将用于上下文增强
             user_id: 用户隔离 ID
         """
-        source_name = (metadata or {}).get("source") or (metadata or {}).get("course_name") or (metadata or {}).get("url") or "unknown"
+        source_name = (
+            (metadata or {}).get("source")
+            or (metadata or {}).get("course_name")
+            or (metadata or {}).get("url")
+            or "unknown"
+        )
         cleaned = clean_raw_text(text)
         # 传递完整元数据以支持上下文增强
-        return await self.rag_service.ingest_text(raw_text=cleaned, source_name=source_name, user_id=user_id, metadata=metadata)
+        return await self.rag_service.ingest_text(
+            raw_text=cleaned, source_name=source_name, user_id=user_id, metadata=metadata
+        )
 
     async def process_file(
-        self, file_content: bytes, filename: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
+        self,
+        file_content: bytes,
+        filename: str,
+        user_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> IngestResult:
         """
         摄入 PDF 文件到向量库（优化版：支持上下文增强元数据）。
@@ -50,5 +63,6 @@ class IngestionService:
         """
         if not filename or not filename.lower().endswith(".pdf"):
             raise ValueError("仅支持 PDF 文件格式")
-        return await self.rag_service.ingest_pdf(file_content=file_content, filename=filename, user_id=user_id, metadata=metadata)
-
+        return await self.rag_service.ingest_pdf(
+            file_content=file_content, filename=filename, user_id=user_id, metadata=metadata
+        )

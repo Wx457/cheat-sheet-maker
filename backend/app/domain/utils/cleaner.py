@@ -58,5 +58,3 @@ def densify_item_content(text: str) -> str:
     text = re.sub(r"\s*\n\s*", "  ", text)
 
     return text.strip()
-
-

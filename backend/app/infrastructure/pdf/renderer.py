@@ -4,13 +4,11 @@ PDF 渲染（Infra）
 """
 
 import json
-import os
 from typing import Any, Dict
 
 from playwright.async_api import async_playwright
 
 from app.core.config import settings
-
 
 # 前端 URL 配置（使用 HashRouter，所以是 #/print）
 # 现在使用 Vite 多入口构建：
@@ -34,16 +32,22 @@ async def generate_pdf_via_browser(data_json: Dict[str, Any]) -> bytes:
         )
 
         try:
-            page = await browser.new_page(viewport={"width": 1920, "height": 1080}, device_scale_factor=1)
+            page = await browser.new_page(
+                viewport={"width": 1920, "height": 1080}, device_scale_factor=1
+            )
 
             await page.goto(FRONTEND_URL, wait_until="networkidle", timeout=30000)
 
-            await page.evaluate(f"window.CHEAT_SHEET_DATA = {json.dumps(data_json, ensure_ascii=False)}")
+            await page.evaluate(
+                f"window.CHEAT_SHEET_DATA = {json.dumps(data_json, ensure_ascii=False)}"
+            )
 
             try:
                 await page.wait_for_selector("#render-complete", state="attached", timeout=10000)
             except Exception as exc:  # noqa: PERF203
-                print(f"⚠️ Warning: Render completion marker (#render-complete) not detected, continuing PDF generation: {exc}")
+                print(
+                    f"⚠️ Warning: Render completion marker (#render-complete) not detected, continuing PDF generation: {exc}"
+                )
 
             await page.wait_for_timeout(1000)
 
@@ -55,5 +59,3 @@ async def generate_pdf_via_browser(data_json: Dict[str, Any]) -> bytes:
             return pdf_bytes
         finally:
             await browser.close()
-
-

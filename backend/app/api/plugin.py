@@ -25,6 +25,7 @@ router = APIRouter()
 
 class ErrorResponse(BaseModel):
     """结构化错误响应模型"""
+
     error: str  # 错误类型代码
     message: str  # 人类可读的错误消息
     retry_after: Optional[int] = None  # 建议重试时间（秒）
@@ -36,35 +37,32 @@ def _create_error_response(
     message: str,
     retry_after: Optional[int] = None,
     details: Optional[str] = None,
-    status_code: int = 500
+    status_code: int = 500,
 ) -> HTTPException:
     """
     创建结构化的错误响应
-    
+
     Args:
         error_type: 错误类型代码（如 "QUOTA_EXCEEDED", "SERVICE_UNAVAILABLE"）
         message: 人类可读的错误消息
         retry_after: 建议重试时间（秒）
         details: 详细错误信息
         status_code: HTTP 状态码
-        
+
     Returns:
         HTTPException 对象
     """
     error_response = ErrorResponse(
-        error=error_type,
-        message=message,
-        retry_after=retry_after,
-        details=details
+        error=error_type, message=message, retry_after=retry_after, details=details
     )
     return HTTPException(
-        status_code=status_code,
-        detail=error_response.model_dump(exclude_none=True)
+        status_code=status_code, detail=error_response.model_dump(exclude_none=True)
     )
 
 
 class TaskResponse(BaseModel):
     """任务提交响应"""
+
     task_id: str
     status: str = "pending"
     message: str = "Task submitted, processing..."
@@ -77,11 +75,13 @@ class TaskResponse(BaseModel):
 async def plugin_analyze(
     request: Request,
     payload: PluginAnalyzeRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="User ID (required for data isolation)")
+    x_user_id: str = Header(
+        ..., alias="X-User-ID", description="User ID (required for data isolation)"
+    ),
 ) -> TaskResponse:
     """
     Chrome 插件：抓取 + 分析接口
-    
+
     流程：
     1. 保存：将抓取的文本存入向量库
     2. 检索：根据 syllabus 检索相关上下文
@@ -92,12 +92,16 @@ async def plugin_analyze(
 
         ingest_result = await ingestion.process_text(
             text=payload.content,
-            metadata={"course_name": payload.course_name, "url": payload.url, "source": payload.course_name or payload.url},
+            metadata={
+                "course_name": payload.course_name,
+                "url": payload.url,
+                "source": payload.course_name or payload.url,
+            },
             user_id=x_user_id,
         )
-        
+
         print(f"✅ Saved {ingest_result['chunks_count']} chunks to vector database")
-        
+
         # Step 2: 检索相关上下文
         # 注意：刚保存的内容已经进入向量库，可以立即检索到
         rag_context_str = ""
@@ -105,13 +109,17 @@ async def plugin_analyze(
             query = payload.syllabus
             results = await ingestion.rag_service.search_context(query, user_id=x_user_id, k=10)
             if results:
-                rag_context_str = "\n--- RAG Context from Knowledge Base (filtered by syllabus) ---\n"
+                rag_context_str = (
+                    "\n--- RAG Context from Knowledge Base (filtered by syllabus) ---\n"
+                )
                 for r in results:
                     rag_context_str += f"Source: {r['source']}\n"
                     rag_context_str += f"Content: {r['content']}\n"
                     rag_context_str += "---------------------------------------\n"
         else:
-            query = payload.course_name or (payload.content[:300] if len(payload.content) > 300 else payload.content)
+            query = payload.course_name or (
+                payload.content[:300] if len(payload.content) > 300 else payload.content
+            )
             results = await ingestion.rag_service.search_context(query, user_id=x_user_id, k=10)
             if results:
                 rag_context_str = "\n--- General RAG Context from Knowledge Base ---\n"
@@ -119,7 +127,7 @@ async def plugin_analyze(
                     rag_context_str += f"Source: {r['source']}\n"
                     rag_context_str += f"Content: {r['content']}\n"
                     rag_context_str += "---------------------------------------\n"
-        
+
         # Step 3: 生成主题列表（改为异步任务模式）
         # 基于检索到的 RAG 上下文生成主题列表
         # 如果 RAG 上下文为空，使用原始内容摘要作为后备
@@ -133,18 +141,18 @@ async def plugin_analyze(
             # 如果没有检索到上下文，使用原始内容摘要
             analysis_text = payload.content[:2000]
             print("⚠️ No RAG context found, using original content summary")
-        
+
         # 将生成大纲任务推送到 ARQ 队列（传递 user_id 用于数据隔离）
         arq_pool = request.app.state.arq_pool
-        
+
         job = await arq_pool.enqueue_job(
-            'generate_outline_task',
+            "generate_outline_task",
             raw_text=analysis_text,
             user_context=payload.course_name,
             exam_type=(payload.exam_type or ExamType.final).value,
-            user_id=x_user_id
+            user_id=x_user_id,
         )
-        
+
         return TaskResponse(
             task_id=job.job_id,
             status="pending",
@@ -153,7 +161,7 @@ async def plugin_analyze(
             ingest_batch_id=ingest_result["ingest_batch_id"],
             ingest_at=ingest_result["ingest_at"],
         )
-        
+
     except ValueError as e:
         # LLM 相关的错误（如 Rate Limit、超时等）
         error_msg = str(e)
@@ -163,7 +171,7 @@ async def plugin_analyze(
                 message="API quota exceeded, please try again later",
                 retry_after=60,
                 details=error_msg,
-                status_code=429
+                status_code=429,
             )
         elif "超时" in error_msg or "timeout" in error_msg.lower():
             raise _create_error_response(
@@ -171,22 +179,26 @@ async def plugin_analyze(
                 message="Request timeout, please try again later",
                 retry_after=30,
                 details=error_msg,
-                status_code=408
+                status_code=408,
             )
-        elif "服务" in error_msg or "service" in error_msg.lower() or "unavailable" in error_msg.lower():
+        elif (
+            "服务" in error_msg
+            or "service" in error_msg.lower()
+            or "unavailable" in error_msg.lower()
+        ):
             raise _create_error_response(
                 error_type="SERVICE_UNAVAILABLE",
                 message="Service temporarily unavailable, please try again later",
                 retry_after=60,
                 details=error_msg,
-                status_code=503
+                status_code=503,
             )
         else:
             raise _create_error_response(
                 error_type="VALIDATION_ERROR",
                 message="Validation failed",
                 details=error_msg,
-                status_code=400
+                status_code=400,
             )
     except Exception as e:
         traceback.print_exc()
@@ -194,7 +206,7 @@ async def plugin_analyze(
             error_type="INTERNAL_ERROR",
             message="Unknown error occurred during analysis",
             details=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -202,11 +214,11 @@ async def plugin_analyze(
 async def plugin_generate_final(
     request: Request,
     payload: PluginGenerateRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> TaskResponse:
     """
     Chrome 插件：生成最终 PDF 内容
-    
+
     现在改为异步任务模式：
     1. 将生成任务推送到 Redis 队列
     2. 立即返回 task_id
@@ -215,7 +227,7 @@ async def plugin_generate_final(
     """
     try:
         arq_pool = request.app.state.arq_pool
-        
+
         # 构造 GenerateSheetRequest 的负载数据（传递 user_id 用于数据隔离）
         task_kwargs = {
             "syllabus": payload.syllabus,
@@ -229,25 +241,22 @@ async def plugin_generate_final(
             "_metadata": {
                 "course_name": payload.course_name,
                 "syllabus": payload.syllabus,
-                "education_level": payload.education_level.value if payload.education_level else None,
+                "education_level": (
+                    payload.education_level.value if payload.education_level else None
+                ),
                 "exam_type": payload.exam_type.value if payload.exam_type else None,
                 "page_limit": payload.page_limit.value if payload.page_limit else None,
                 "selected_topics": [topic.model_dump() for topic in payload.selected_topics],
-            }
+            },
         }
-        
+
         # 推送任务到 ARQ 队列
-        job = await arq_pool.enqueue_job(
-            'generate_cheat_sheet_task',
-            **task_kwargs
-        )
-        
+        job = await arq_pool.enqueue_job("generate_cheat_sheet_task", **task_kwargs)
+
         return TaskResponse(
-            task_id=job.job_id,
-            status="pending",
-            message="小抄生成任务已提交，正在处理中"
+            task_id=job.job_id, status="pending", message="小抄生成任务已提交，正在处理中"
         )
-        
+
     except ValueError as e:
         # LLM 相关的错误（如 Rate Limit、超时等）
         error_msg = str(e)
@@ -257,7 +266,7 @@ async def plugin_generate_final(
                 message="API 配额已用尽，请稍后重试",
                 retry_after=60,
                 details=error_msg,
-                status_code=429
+                status_code=429,
             )
         elif "超时" in error_msg or "timeout" in error_msg.lower():
             raise _create_error_response(
@@ -265,22 +274,26 @@ async def plugin_generate_final(
                 message="请求超时，请稍后重试",
                 retry_after=30,
                 details=error_msg,
-                status_code=408
+                status_code=408,
             )
-        elif "服务" in error_msg or "service" in error_msg.lower() or "unavailable" in error_msg.lower():
+        elif (
+            "服务" in error_msg
+            or "service" in error_msg.lower()
+            or "unavailable" in error_msg.lower()
+        ):
             raise _create_error_response(
                 error_type="SERVICE_UNAVAILABLE",
                 message="服务暂时不可用，请稍后重试",
                 retry_after=60,
                 details=error_msg,
-                status_code=503
+                status_code=503,
             )
         else:
             raise _create_error_response(
                 error_type="VALIDATION_ERROR",
                 message="输入验证失败",
                 details=error_msg,
-                status_code=400
+                status_code=400,
             )
     except Exception as e:
         traceback.print_exc()
@@ -288,7 +301,7 @@ async def plugin_generate_final(
             error_type="INTERNAL_ERROR",
             message="Unknown error occurred during generation",
             details=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -296,36 +309,30 @@ async def plugin_generate_final(
 async def get_project(project_id: str) -> CheatSheetSchema:
     """
     获取项目数据
-    
+
     根据 project_id 从数据库获取项目的小抄数据
     """
     try:
         # 验证 project_id 格式
         if not ObjectId.is_valid(project_id):
-            raise HTTPException(
-                status_code=400,
-                detail=f"无效的 project_id: {project_id}"
-            )
-        
+            raise HTTPException(status_code=400, detail=f"无效的 project_id: {project_id}")
+
         # 从数据库获取项目数据
         client = MongoClient(settings.MONGODB_URI)
         db = client[settings.DB_NAME]
         projects_collection = db["projects"]
-        
+
         # 查询项目
         project = projects_collection.find_one({"_id": ObjectId(project_id)})
         if not project:
-            raise HTTPException(
-                status_code=404,
-                detail=f"未找到项目: {project_id}"
-            )
-        
+            raise HTTPException(status_code=404, detail=f"未找到项目: {project_id}")
+
         client.close()
-        
+
         # 返回小抄数据
         cheat_sheet_data = project.get("cheat_sheet", {})
         return CheatSheetSchema(**cheat_sheet_data)
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -334,7 +341,7 @@ async def get_project(project_id: str) -> CheatSheetSchema:
             error_type="INTERNAL_ERROR",
             message="Failed to get project data",
             details=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -342,7 +349,7 @@ async def get_project(project_id: str) -> CheatSheetSchema:
 async def download_cheat_sheet(project_id: str) -> Response:
     """
     Chrome 插件：下载生成的 PDF
-    
+
     流程：
     1. 从数据库获取项目数据（确保数据已存库）
     2. 使用 React 前端渲染引擎生成 PDF（通过 pdf_service.generate_pdf_via_browser）
@@ -353,16 +360,16 @@ async def download_cheat_sheet(project_id: str) -> Response:
         client = MongoClient(settings.MONGODB_URI)
         db = client[settings.DB_NAME]
         projects_collection = db["projects"]
-        
+
         # 验证 project_id 格式
         if not ObjectId.is_valid(project_id):
             raise _create_error_response(
                 error_type="INVALID_PROJECT_ID",
                 message="无效的项目 ID 格式",
                 details=f"project_id: {project_id}",
-                status_code=400
+                status_code=400,
             )
-        
+
         # 查询项目
         project = projects_collection.find_one({"_id": ObjectId(project_id)})
         if not project:
@@ -370,9 +377,9 @@ async def download_cheat_sheet(project_id: str) -> Response:
                 error_type="PROJECT_NOT_FOUND",
                 message="未找到指定的项目",
                 details=f"project_id: {project_id}",
-                status_code=404
+                status_code=404,
             )
-        
+
         # 获取 Cheat Sheet 数据
         cheat_sheet_data = project.get("cheat_sheet", {})
         if not cheat_sheet_data:
@@ -380,23 +387,21 @@ async def download_cheat_sheet(project_id: str) -> Response:
                 error_type="CHEAT_SHEET_NOT_FOUND",
                 message="项目中未找到小抄数据",
                 details=f"project_id: {project_id}",
-                status_code=404
+                status_code=404,
             )
-        
+
         client.close()
-        
+
         # 2. 使用 React 前端渲染引擎生成 PDF
         # 直接将 CheatSheet 数据（字典格式）传给 PDF 服务
         # PDF 服务会访问 React 静态页面并注入数据
         pdf_bytes = await generate_pdf_via_browser(cheat_sheet_data)
-        
+
         # 3. 返回 PDF 文件流
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="cheat-sheet-{project_id}.pdf"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="cheat-sheet-{project_id}.pdf"'},
         )
 
     except HTTPException:
@@ -407,7 +412,7 @@ async def download_cheat_sheet(project_id: str) -> Response:
             error_type="PDF_GENERATION_ERROR",
             message="Failed to generate PDF",
             details=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -428,6 +433,5 @@ async def reset_knowledge_base(
             error_type="RESET_FAILED",
             message="Failed to reset knowledge base",
             details=str(e),
-            status_code=500
+            status_code=500,
         )
-

@@ -57,7 +57,9 @@ class CheatSheetPrompts:
         if cleaned_context:
             # 如果包含 RAG 上下文，明确标注
             if "--- RAG Context from Vector Database ---" in cleaned_context:
-                user_input += f"[RAG Context - Primary Source]\n{cleaned_context}\n[End of RAG Context]\n\n"
+                user_input += (
+                    f"[RAG Context - Primary Source]\n{cleaned_context}\n[End of RAG Context]\n\n"
+                )
                 user_input += "Prioritize extracting topics from the above RAG Context, which comes from the vector database and is the actual content of the course.\n\n"
             else:
                 user_input += f"User Background Information:\n{cleaned_context}\n\n"
@@ -162,4 +164,3 @@ Academic Level: {academic_level}
 Course Type: {archetype}
 [End of User Metadata]
 """
-

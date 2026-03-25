@@ -5,6 +5,7 @@
 
 [![Store](https://img.shields.io/badge/Chrome_Web_Store-Live-blue)](https://chromewebstore.google.com/detail/ai-cheat-sheet-generator/aimjdpkndlippaflppddgknkapfiihbl) 
 [![Demo](https://img.shields.io/badge/Demo-YouTube-red)](https://youtu.be/2dKr7PnRBxY?si=Dji06LGYNdrJWN1R)
+[![Backend Tests](https://github.com/Wx457/cheat-sheet-maker/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/Wx457/cheat-sheet-maker/actions/workflows/backend-tests.yml)
 
 ---
 
@@ -13,6 +14,7 @@
 * **Performance Optimization**: Engineered an asynchronous RAG pipeline (FastAPI/Redis), reducing end-to-end latency by **80% (15s → 3s)**.
 * **High-Concurrency Architecture**: Designed a Producer-Consumer pattern capable of absorbing **1,000 RPM** peak traffic with idempotent task processing.
 * **Advanced RAG Strategy**: Implemented **MMR (Maximal Marginal Relevance)** and hash-based deduplication to minimize LLM hallucinations and token redundancy.
+* **Quality Guardrails**: Added a **pytest** regression suite, shared exponential backoff for Gemini/OpenAI calls, and GitHub Actions CI with dependency, lint, format, and smoke-import checks.
 
 **Quick Links:** [Store](https://chromewebstore.google.com/detail/ai-cheat-sheet-generator/aimjdpkndlippaflppddgknkapfiihbl) | [Demo](https://youtu.be/2dKr7PnRBxY?si=Dji06LGYNdrJWN1R) | [Full Technical Specs](#technical-documentation) | [User Guide](#user-guide)
 
@@ -156,3 +158,7 @@ This project is a production-grade AI Agent infrastructure designed to handle hi
 * **AI Engine**: LangChain, Google Gemini 2.5 Flash, OpenAI Embeddings.
 * **Infrastructure**: Redis (Task Queue), MongoDB (Persistence & Vector Store), AWS S3 (Object Storage), Docker.
 * **Frontend**: React 18, TypeScript, KaTeX (LaTeX rendering).
+
+### 5. Quality Gates
+* **Automated Tests**: `pytest` covers domain logic, API contracts, task status flow, and LLM retry behavior.
+* **Continuous Integration**: GitHub Actions runs `pip check`, `ruff`, `black --check`, smoke imports, and `pytest` on backend changes and pull requests.

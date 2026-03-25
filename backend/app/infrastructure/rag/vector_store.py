@@ -9,9 +9,8 @@ from uuid import uuid4
 from pymongo import MongoClient
 from pymongo import errors as pymongo_errors
 from pypdf import PdfReader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
 from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.infrastructure.llm.openai_client import OpenAIClient
@@ -86,7 +85,7 @@ class VectorStore:
             collection=self.collection,
             embedding=self.embeddings,
             index_name="default",
-            text_key="page_content"  # 指定文本字段名为 page_content
+            text_key="page_content",  # 指定文本字段名为 page_content
         )
 
     def _format_metadata_string(self, metadata: Dict[str, Any]) -> str:
@@ -106,7 +105,11 @@ class VectorStore:
         return f"Context: {metadata_str}\nContent: {chunk_text}"
 
     async def ingest_text(
-        self, raw_text: str, source_name: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
+        self,
+        raw_text: str,
+        source_name: str,
+        user_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> IngestResult:
         """
         摄入文本到向量库（优化版：批量嵌入 + 上下文增强）。
@@ -165,7 +168,11 @@ class VectorStore:
         }
 
     async def ingest_pdf(
-        self, file_content: bytes, filename: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
+        self,
+        file_content: bytes,
+        filename: str,
+        user_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> IngestResult:
         """
         摄入 PDF 文件到向量库（优化版：支持上下文增强元数据）。
@@ -188,10 +195,14 @@ class VectorStore:
         if metadata:
             pdf_metadata.update(metadata)
 
-        ingest_result = await self.ingest_text(raw_text, source_name=filename, user_id=user_id, metadata=pdf_metadata)
+        ingest_result = await self.ingest_text(
+            raw_text, source_name=filename, user_id=user_id, metadata=pdf_metadata
+        )
         return ingest_result
 
-    async def search_context_mmr(self, query: str, user_id: str, k: int = 3, fetch_k: int = 10) -> List[dict]:
+    async def search_context_mmr(
+        self, query: str, user_id: str, k: int = 3, fetch_k: int = 10
+    ) -> List[dict]:
         vector_store = self._get_vector_store()
         # 使用 metadata.user_id 路径匹配新的数据结构
         pre_filter = {"metadata.user_id": {"$eq": user_id}}
@@ -203,7 +214,14 @@ class VectorStore:
             lambda: vector_store.max_marginal_relevance_search(query, **search_kwargs),
         )
 
-        return [{"content": doc.page_content, "source": doc.metadata.get("source", "unknown"), "score": 0.0} for doc in results]
+        return [
+            {
+                "content": doc.page_content,
+                "source": doc.metadata.get("source", "unknown"),
+                "score": 0.0,
+            }
+            for doc in results
+        ]
 
     async def search_context(self, query: str, user_id: str, k: int = 5) -> List[dict]:
         vector_store = self._get_vector_store()
@@ -216,7 +234,14 @@ class VectorStore:
             lambda: vector_store.similarity_search_with_score(query, k=k, pre_filter=pre_filter),
         )
 
-        return [{"content": doc.page_content, "source": doc.metadata.get("source", "unknown"), "score": float(score)} for doc, score in results]
+        return [
+            {
+                "content": doc.page_content,
+                "source": doc.metadata.get("source", "unknown"),
+                "score": float(score),
+            }
+            for doc, score in results
+        ]
 
     async def is_batch_searchable(self, query: str, user_id: str, ingest_batch_id: str) -> bool:
         """
@@ -272,5 +297,3 @@ def get_vector_store() -> VectorStore:
     if _vector_store is None:
         _vector_store = VectorStore()
     return _vector_store
-
-

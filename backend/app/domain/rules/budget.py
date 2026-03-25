@@ -36,4 +36,3 @@ class BudgetRule:
                 budget_map[lucky_topic.title] += 1
 
         return budget_map
-

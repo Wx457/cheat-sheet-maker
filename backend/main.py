@@ -28,28 +28,25 @@ async def lifespan(app: FastAPI):
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
         database=settings.REDIS_DB,
-        password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None
+        password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
     )
-    
+
     arq_pool = await create_pool(redis_settings)
     app.state.arq_pool = arq_pool
-    
+
     print("✅ ARQ Redis connection pool created")
 
     # 启动时：创建 MongoDB TTL 索引（幂等）
     setup_mongodb_ttl_indexes()
-    
+
     yield
-    
+
     # 关闭时：清理连接池
     await arq_pool.close(close_connection_pool=True)
     print("👋 ARQ Redis connection pool closed")
 
 
-app = FastAPI(
-    title="Cheat Sheet Maker API",
-    lifespan=lifespan
-)
+app = FastAPI(title="Cheat Sheet Maker API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,7 +64,7 @@ app.include_router(task_router, tags=["Task"])
 
 # TTL 过期时间（秒）
 PROJECTS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 7  # 7 天
-VECTORS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 3   # 3 天
+VECTORS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 3  # 3 天
 
 
 def setup_mongodb_ttl_indexes() -> None:
@@ -102,28 +99,32 @@ def setup_mongodb_ttl_indexes() -> None:
         except Exception:
             pass
 
+
 # 挂载静态文件（前端构建产物）
 # 注意：static 目录应该在 Dockerfile 构建时从 frontend/dist 复制过来
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     # 挂载根目录，用于访问 index.html
     app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
+
     # 3. 👇 新增：根路径路由 (这就是我们要加的！)
     @app.get("/")
     async def read_root():
         # 直接读取并返回 index.html 文件
         return FileResponse(static_dir / "index.html")
-    
+
     # 挂载 assets 目录，用于访问 JS/CSS 等资源文件
     # Vite 构建的 HTML 中资源路径是 /assets/xxx，所以需要单独挂载
     assets_dir = static_dir / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
         print(f"✅ Assets directory mounted: {assets_dir}")
-    
+
     print(f"✅ Static files mounted: {static_dir}")
 else:
-    print(f"⚠️ Warning: Static files directory does not exist: {static_dir}, PDF generation may not work properly")
+    print(
+        f"⚠️ Warning: Static files directory does not exist: {static_dir}, PDF generation may not work properly"
+    )
 
 
 @app.get("/health")
