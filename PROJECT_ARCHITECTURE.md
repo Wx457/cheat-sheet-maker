@@ -63,12 +63,13 @@ cheat-sheet-maker/
 │   │   │   │   ├── gemini_client.py
 │   │   │   │   │   └── GeminiClient.generate_text()/generate_json() # Gemini call with retry
 │   │   │   │   └── openai_client.py
-│   │   │   │       └── OpenAIClient.embed_documents()/embed_query() # OpenAI Embedding
+│   │   │   │       └── OpenAIClient.embed_documents()/embed_query() # OpenAI Embedding (auto sub-batching)
 │   │   │   ├── pdf/renderer.py
 │   │   │   │   └── generate_pdf_via_browser() # Playwright render frontend static page to generate PDF (uses PDF_GENERATION_HOST config to access FastAPI)
 │   │   │   ├── rag/vector_store.py
-│   │   │   │   ├── VectorStore.ingest_text()/ingest_pdf() # Chunk → vectorize → MongoDB
+│   │   │   │   ├── VectorStore.ingest_text()/ingest_pdf() # Chunk → quota check/truncate → vectorize → MongoDB
 │   │   │   │   ├── search_context_mmr()/search_context() # user_id-based retrieval/MMR deduplication
+│   │   │   │   ├── find_chunks_by_user()             # Plain MongoDB fallback (bypasses vector index)
 │   │   │   │   ├── delete_user_data()/clear_vector_data() # User/full vector cleanup
 │   │   │   │   └── get_vector_store() # Singleton get VectorStore
 │   │   │   └── storage/minio_client.py
@@ -169,7 +170,10 @@ User Input/PDF File
 [Text Chunking] (RecursiveCharacterTextSplitter)
     │
     ▼
-[Generate Vectors] (OpenAI Embedding API)
+[Quota Check & Truncate] (per-ingest / per-user chunk limits)
+    │
+    ▼
+[Generate Vectors] (OpenAI Embedding API, auto sub-batched)
     │
     ▼
 [Store to MongoDB] (MongoDBAtlasVectorSearch)
@@ -334,8 +338,12 @@ User Request
 - `REDIS_PORT` - Redis port (default: `6379`)
 - `REDIS_DB` - Redis database number (default: `0`)
 - `REDIS_PASSWORD` - Redis password (optional)
-- `RAG_RETRY_ATTEMPTS` - Outline retrieval retry attempts when vector index is not yet queryable (default: `5`)
-- `RAG_RETRY_DELAY_SECONDS` - Delay between retries for eventual consistency window (default: `3`)
+- `RAG_RETRY_ATTEMPTS` - Outline retrieval retry attempts when vector index is not yet queryable (default: `6`)
+- `RAG_RETRY_DELAY_SECONDS` - Base delay for exponential-backoff retries during eventual consistency window (default: `2`)
+- `EMBEDDING_BATCH_SIZE` - Max texts per OpenAI embedding API call (default: `100`)
+- `EMBEDDING_BATCH_DELAY_SECONDS` - Inter-batch delay to avoid rate limits (default: `0.5`)
+- `MAX_CHUNKS_PER_USER` - Per-user knowledge base chunk limit (default: `500`)
+- `MAX_CHUNKS_PER_INGEST` - Per-ingest chunk limit (default: `200`)
 
 ## 🚀 Production Operations Practices
 
@@ -347,7 +355,7 @@ User Request
 ### MongoDB Topology Changes
 - During replica set elections/upgrades, brief `NoPrimary`/selection timeouts are expected.
 - App-level mitigation: retry with exponential backoff in vector store operations (insert/search/count/delete).
-- Outline-generation-specific mitigation: when Atlas vector indexing is not finished and retrieval returns 0 chunks, service retries polling via `_search_context_with_retry()` before giving up.
+- Outline-generation-specific mitigation: when Atlas vector indexing is not finished and retrieval returns 0 chunks, service retries with **exponential backoff** via `_search_context_with_retry()`, then falls back to a **plain MongoDB `find()` query** (bypassing the vector index) before giving up.
 - Batch-ID gating:
   - Each ingest writes `metadata.ingest_batch_id`.
   - Frontend stores `lastIngestBatchId` and sends it to `/api/outline`.

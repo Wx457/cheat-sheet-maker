@@ -11,10 +11,10 @@
 
 ### 🛠️ Engineering Highlights (For Google Reviewers)
 * **Infrastructure Reliability**: Resolved the **Docker PID 1 zombie reaping problem** via custom init processes, ensuring 0-downtime scaling for Playwright/Chromium workers.
-* **Performance Optimization**: Engineered an asynchronous RAG pipeline (FastAPI/Redis), reducing end-to-end latency by **80% (15s → 3s)**.
+* **Performance Optimization**: Engineered an asynchronous RAG pipeline (FastAPI/Redis), reducing end-to-end latency by **80% (15s → 3s)**. Embedding calls use configurable **sub-batching with inter-batch delay** to avoid provider rate limits on large ingestions.
 * **High-Concurrency Architecture**: Designed a Producer-Consumer pattern capable of absorbing **1,000 RPM** peak traffic with idempotent task processing.
 * **Advanced RAG Strategy**: Implemented **MMR (Maximal Marginal Relevance)** and hash-based deduplication to minimize LLM hallucinations and token redundancy.
-* **Quality Guardrails**: Added a **pytest** regression suite, shared exponential backoff for Gemini/OpenAI calls, and GitHub Actions CI with dependency, lint, format, and smoke-import checks.
+* **Quality Guardrails**: Added a **pytest** regression suite, shared exponential backoff for Gemini/OpenAI calls, **per-user / per-ingest chunk quota** with graceful truncation, and GitHub Actions CI with dependency, lint, format, and smoke-import checks.
 
 **Quick Links:** [Store](https://chromewebstore.google.com/detail/ai-cheat-sheet-generator/aimjdpkndlippaflppddgknkapfiihbl) | [Demo](https://youtu.be/2dKr7PnRBxY?si=Dji06LGYNdrJWN1R) | [Full Technical Specs](#technical-documentation) | [User Guide](#user-guide)
 
@@ -136,7 +136,7 @@ This project is a production-grade AI Agent infrastructure designed to handle hi
     * **Solution**: Implemented a custom `init` process to properly reap defunct child processes. Integrated `tini` for correct Unix signal forwarding (SIGTERM/SIGINT), ensuring zero-downtime scaling and clean resource deallocation.
 * **High-Concurrency Task Pipeline**: 
     * **Architecture**: Designed a **Producer-Consumer pattern** using **FastAPI (asyncio)** and **ARQ (Redis-backed)**.
-    * **Optimization**: Implemented **Read-after-write consistency** for asynchronous vector indexing using Batch-ID tracking, ensuring that users can immediately query newly ingested knowledge without race conditions.
+    * **Optimization**: Implemented **Read-after-write consistency** for asynchronous vector indexing using Batch-ID tracking with **exponential-backoff polling** and a **plain-MongoDB fallback**, ensuring that users can immediately query newly ingested knowledge without race conditions or silent degradation.
 
 ### 2. High-Performance RAG Architecture
 * **Latency Reduction (15s → 3s)**: 
@@ -151,7 +151,7 @@ This project is a production-grade AI Agent infrastructure designed to handle hi
     * Leveraged **Redis-based distributed locking** and task-state machines (QUEUING → PROCESSING → COMPLETED) to prevent duplicate generation during network retries.
 * **Cloud Infrastructure**: 
     * **AWS S3 + Presigned URLs**: Implemented a secure, short-lived presigned URL strategy for PDF delivery, decoupling file storage from the API server to reduce egress load and improve security.
-    * **Rate Limiting**: Engineered a quota-based rate limiter to handle burst traffic of up to **1,000 RPM** during peak launch periods.
+    * **Rate Limiting & Quotas**: Engineered a quota-based rate limiter to handle burst traffic of up to **1,000 RPM** during peak launch periods. Ingestion enforces **per-user** and **per-request chunk limits** with automatic truncation, signaled to the frontend via HTTP 429 / truncation metadata.
 
 ### 4. Technical Stack
 * **Backend**: Python 3.10+, FastAPI (Asynchronous Framework), Pydantic v2 (Data Validation).
