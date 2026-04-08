@@ -1,38 +1,33 @@
 // content.js
 
-// 辅助函数：暂停等待
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================================
-// 精准定位滚动条 -> 边滚边抓 -> 去重
+// Locate scroll container → scroll & capture → deduplicate
 // ============================================================
 async function scrollAndCollect() {
   const scrollableDiv = document.querySelector('[data-scroll-root]');
 
   if (!scrollableDiv) {
-    console.error("Still cannot find data-scroll-root container, unable to auto-scroll!");
-    // 如果找不到，只能兜底抓当前屏幕
+    console.error("Cannot find data-scroll-root container, unable to auto-scroll!");
     return extractCurrentView();
   }
 
   console.log("Found scroll container:", scrollableDiv);
   console.log("Starting stream capture...");
 
-  // 用于存储抓取到的所有文本，使用 Set 防止重复
   let uniqueTexts = new Set();
-  let orderedContent = []; 
+  let orderedContent = [];
 
-  // A. 先滚回顶部，确保从头开始
-  // 使用 'instant' 行为防止平滑滚动拖慢节奏
+  // Scroll to top first; use 'instant' to avoid smooth-scroll delay
   scrollableDiv.scrollTo({ top: 0, behavior: "instant" });
-  await sleep(1000); // 顶部加载通常需要久一点
+  await sleep(1000);
 
-  // B. 开始向下滚动循环
   let lastScrollTop = -1;
-  const step = 600; // 步长调小一点，确保不漏
+  const step = 600;
   
   while (true) {
-    // 1. 抓取当前视口可见的所有对话
+    // Capture all visible conversation fragments
     const visibleDivs = document.querySelectorAll('.markdown');
     
     if (visibleDivs.length > 0) {
@@ -45,8 +40,7 @@ async function scrollAndCollect() {
         });
     }
 
-    // 2. 检查是否到底
-    // scrollHeight 是总高度，scrollTop 是卷去的高度，clientHeight 是可见窗口高度
+    // Check if bottom is reached
     const isAtBottom = Math.ceil(scrollableDiv.scrollTop + scrollableDiv.clientHeight) >= scrollableDiv.scrollHeight - 50;
     
     if (isAtBottom) {
@@ -54,10 +48,9 @@ async function scrollAndCollect() {
       break;
     }
     
-    // 防死循环检测：位置没变说明卡住了
+    // Deadlock detection: position unchanged means stuck
     if (Math.abs(scrollableDiv.scrollTop - lastScrollTop) < 5 && lastScrollTop !== -1) {
         console.warn("Scroll position unchanged, attempting forced scroll...");
-        // 尝试一次大跳跃，如果还不行就退出
         scrollableDiv.scrollBy({ top: step, behavior: "instant" });
         await sleep(500);
         if (Math.abs(scrollableDiv.scrollTop - lastScrollTop) < 5) {
@@ -67,21 +60,18 @@ async function scrollAndCollect() {
     }
     lastScrollTop = scrollableDiv.scrollTop;
 
-    // 3. 执行向下滚动
     scrollableDiv.scrollBy({ top: step, behavior: "instant" });
     
-    // 4. 等待加载 (如果你网络慢，把这里改成 800 或 1000)
+    // Wait for lazy-loaded content (increase to 800–1000 on slow networks)
     await sleep(600); 
   }
 
-  // C. 拼接结果
   const finalTitle = document.title || window.location.href;
   
   if (orderedContent.length === 0) {
       return extractCurrentView();
   }
 
-  // 格式化输出
   let combinedText = orderedContent.map((text, index) => {
       return `=== Conversation Fragment ${index + 1} ===\n\n${text}`;
   }).join("\n\n");
@@ -94,7 +84,7 @@ async function scrollAndCollect() {
   };
 }
 
-// 兜底函数
+// Fallback: grab whatever is currently visible
 function extractCurrentView() {
     const divs = document.querySelectorAll('.markdown');
     let text = "";
@@ -107,7 +97,7 @@ function extractCurrentView() {
     };
 }
 
-// 监听消息
+// Message listener
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'scrape') {
     (async () => {

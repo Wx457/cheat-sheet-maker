@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. Redis 服务
+  # 1. Redis
   redis:
     image: redis:alpine
     container_name: cheat-redis
@@ -19,26 +19,21 @@ services:
     networks:
       - app_network
 
-  # 2. FastAPI 后端
+  # 2. FastAPI backend
   backend:
     init: true
     build: 
       context: ./backend
     container_name: cheat-backend
     restart: unless-stopped
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    volumes:
-      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
-    # Redis 配置
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PDF_GENERATION_HOST=http://backend:8000
       - PYTHONDONTWRITEBYTECODE=1
-
-    # AWS 的配置：Docker 会自动读取这个文件里的 AWS_ACCESS_KEY 等变量
     env_file:
       - ./backend/.env
     depends_on:
@@ -53,22 +48,19 @@ services:
     networks:
       - app_network
 
-  # 3. ARQ Worker (消费者)
+  # 3. ARQ Worker (consumer)
   worker:
     init: true
     build: 
       context: ./backend
     container_name: cheat-worker
     restart: unless-stopped
-    command: arq app.worker.WorkerSettings --watch app
-    volumes:
-      - ./backend:/app
+    command: arq app.worker.WorkerSettings
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PDF_GENERATION_HOST=http://backend:8000
       - PYTHONDONTWRITEBYTECODE=1
-
     env_file:
       - ./backend/.env
     depends_on:

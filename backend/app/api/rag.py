@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
 from pydantic import BaseModel
 
 from app.application.services.ingestion_service import IngestionService
+from app.infrastructure.rag.vector_store import QuotaExceededError
 
 router = APIRouter()
 
@@ -23,6 +24,8 @@ class IngestResponse(BaseModel):
     chunks_count: int
     ingest_batch_id: str
     ingest_at: datetime
+    truncated: bool = False
+    original_chunks_count: int = 0
 
 
 class SearchRequest(BaseModel):
@@ -99,11 +102,15 @@ async def ingest_text(
         )
 
         return IngestResponse(
-            status="success",
+            status="truncated" if ingest_result["truncated"] else "success",
             chunks_count=ingest_result["chunks_count"],
             ingest_batch_id=ingest_result["ingest_batch_id"],
             ingest_at=ingest_result["ingest_at"],
+            truncated=ingest_result["truncated"],
+            original_chunks_count=ingest_result["original_chunks_count"],
         )
+    except QuotaExceededError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"文本摄入时发生错误: {str(e)}")
@@ -160,13 +167,17 @@ async def ingest_file(
         )
 
         return IngestResponse(
-            status="success",
+            status="truncated" if ingest_result["truncated"] else "success",
             chunks_count=ingest_result["chunks_count"],
             ingest_batch_id=ingest_result["ingest_batch_id"],
             ingest_at=ingest_result["ingest_at"],
+            truncated=ingest_result["truncated"],
+            original_chunks_count=ingest_result["original_chunks_count"],
         )
     except HTTPException:
         raise
+    except QuotaExceededError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"文件摄入时发生错误: {str(e)}")

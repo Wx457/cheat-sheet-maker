@@ -1,0 +1,6 @@
+# Extension packaging artifacts & local keys (store zip / self-signed crx)
+*.zip
+*.crx
+*.pem
+
+.DS_Store

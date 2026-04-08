@@ -116,11 +116,11 @@ Chrome extension for Cheat Sheet Maker that enables knowledge base building thro
 - **Manifest Version**: 3
 - **Permissions**: 
   - `activeTab`: Access to the current active tab
-  - `scripting`: Inject content scripts
   - `storage`: Store form data locally
   - `sidePanel`: Display extension UI in side panel
-- **Content Script**: Automatically injected into all web pages to enable content scraping
-- **Background Script**: Handles message passing between content script and extension UI
+- **Content scripts**: Declared in the manifest (`content_scripts`) for page scraping; no `scripting` permission required
+- **API config**: `api-config.js` defines local vs production API origins; `config.js` picks one based on whether the manifest has `update_url` (Chrome Web Store builds). Keep origins in sync with `host_permissions` in `manifest.json`
+- **Background Script**: Handles Side Panel open behavior
 - **Form Persistence**: Automatically saves form data to Chrome storage for restoration
 
 ### Icon Files
@@ -244,11 +244,11 @@ The extension includes the following icon files:
 - **清单版本**：3
 - **权限**：
   - `activeTab`：访问当前活动标签页
-  - `scripting`：注入内容脚本
   - `storage`：本地存储表单数据
   - `sidePanel`：在侧边栏显示扩展 UI
-- **内容脚本**：自动注入到所有网页以启用内容抓取
-- **后台脚本**：处理内容脚本和扩展 UI 之间的消息传递
+- **内容脚本**：在 manifest 的 `content_scripts` 中声明，用于页面抓取；不需要 `scripting` 权限
+- **API 配置**：`api-config.js` 定义本地与生产 API 基地址；`config.js` 根据 manifest 是否含 `update_url`（商店版）选择环境。修改生产地址时需同步更新 `manifest.json` 中的 `host_permissions`
+- **后台脚本**：负责侧边栏打开等行为
 - **表单持久化**：自动将表单数据保存到 Chrome 存储以便恢复
 
 ### 图标文件

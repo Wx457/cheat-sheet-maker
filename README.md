@@ -162,3 +162,7 @@ This project is a production-grade AI Agent infrastructure designed to handle hi
 ### 5. Quality Gates
 * **Automated Tests**: `pytest` covers domain logic, API contracts, task status flow, and LLM retry behavior.
 * **Continuous Integration**: GitHub Actions runs `pip check`, `ruff`, `black --check`, smoke imports, and `pytest` on backend changes and pull requests.
+
+### 6. Deployment & Operations
+* **Docker**: Use `docker compose` (with `docker-compose.override.yml`) for local development with hot reload; use **only** `docker-compose.yml` on production hosts (see `deploy-prod.sh` and **[DEPLOYMENT.md](DEPLOYMENT.md)**).
+* **Chrome extension**: API origins are centralized in `chrome-extension/api-config.js`; keep them aligned with `manifest.json` `host_permissions`.

@@ -1,0 +1,39 @@
+# =============================================================================
+# Repository root: secrets, local env, and common junk files.
+# Sub-projects have their own .gitignore (frontend/node_modules, backend/venv, etc.);
+# this file only covers repo-wide patterns and root-level stray files.
+# =============================================================================
+
+# Secrets & local environment (never commit)
+.env
+**/.env
+*.pem
+*.pem.*
+*.key
+*Zone.Identifier
+*.p12
+
+# Local Docker override (use docker-compose.override.local.yml for personal tweaks)
+docker-compose.override.local.yml
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Logs & temp files
+*.log
+*.tmp
+.cache/
+
+# Packaging artifacts that may appear in the root
+*.zip
+*.crx

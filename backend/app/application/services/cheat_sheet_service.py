@@ -52,12 +52,15 @@ class CheatSheetService:
         k: int = 10,
         required_batch_id: Optional[str] = None,
     ) -> List[dict]:
-        """
-        Polling retry for eventual consistency of Atlas vector index.
-        If no chunks found, wait and retry without blocking event loop.
+        """Polling retry with exponential back-off for Atlas vector index
+        eventual consistency, plus a plain-MongoDB fallback.
+
+        Back-off schedule (base=RAG_RETRY_DELAY_SECONDS, default 2s):
+            attempt 1 → 2s, attempt 2 → 4s, attempt 3 → 8s, …
+        Capped at 30 s per wait.
         """
         max_attempts = settings.RAG_RETRY_ATTEMPTS
-        delay_seconds = settings.RAG_RETRY_DELAY_SECONDS
+        base_delay = settings.RAG_RETRY_DELAY_SECONDS
 
         for attempt in range(1, max_attempts + 1):
             logger.info(
@@ -79,7 +82,8 @@ class CheatSheetService:
                         required_batch_id,
                     )
                     if attempt < max_attempts:
-                        await asyncio.sleep(delay_seconds)
+                        delay = min(base_delay * (2 ** (attempt - 1)), 30)
+                        await asyncio.sleep(delay)
                     continue
 
             results = await self.rag_service.search_context(query, user_id=user_id, k=k)
@@ -104,15 +108,25 @@ class CheatSheetService:
             )
 
             if attempt < max_attempts:
-                await asyncio.sleep(delay_seconds)
+                delay = min(base_delay * (2 ** (attempt - 1)), 30)
+                await asyncio.sleep(delay)
 
+        # --- Fallback: plain MongoDB query (no vector index) ---
         logger.warning(
-            "RAG retrieval exhausted retries after %d attempts, user_id=%s, required_batch_id=%s",
+            "RAG vector search exhausted %d attempts; falling back to plain MongoDB find for user_id=%s",
             max_attempts,
             user_id,
-            required_batch_id,
         )
-        return []
+        fallback = await asyncio.to_thread(
+            self.rag_service.find_chunks_by_user, user_id, k
+        )
+        if fallback:
+            logger.info(
+                "MongoDB fallback returned %d chunks for user_id=%s", len(fallback), user_id
+            )
+        else:
+            logger.warning("MongoDB fallback also returned 0 chunks for user_id=%s", user_id)
+        return fallback
 
     async def generate_outline(
         self,

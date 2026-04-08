@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <style>
-    /* 全局样式：保持插件的小巧风格 */
+    /* Global styles */
     body {
       width: 100%;
       min-width: 300px;
-      max-width: 400px; /* Side Panel 通常宽度为 300-400px */
+      max-width: 400px;
       margin: 0;
       padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -16,7 +16,7 @@
       background-color: #fff;
       display: flex;
       flex-direction: column;
-      min-height: 100vh; /* Side Panel 使用视口高度 */
+      min-height: 100vh;
     }
 
     .reset-btn {
@@ -45,19 +45,19 @@
       margin: 0;
       padding: 16px;
       font-size: 18px;
-      color: #0ABAB5; /* 蒂芙尼蓝 */
+      color: #0ABAB5;
       text-align: center;
       border-bottom: 1px solid #e8eaed;
     }
 
-    /* 主内容区域（可滚动） */
+    /* Main scrollable content area */
     .main-content {
       flex: 1;
       overflow-y: auto;
       padding: 16px;
     }
 
-    /* 表单组通用样式 */
+    /* Form group */
     .form-group {
       margin-bottom: 12px;
     }
@@ -70,7 +70,7 @@
       color: #5f6368;
     }
 
-    /* 文本输入框样式 */
+    /* Text inputs */
     input[type="text"], textarea {
       width: 100%;
       padding: 8px;
@@ -87,7 +87,7 @@
       outline: none;
     }
 
-    /* 单选按钮组容器 */
+    /* Radio group */
     .radio-group {
       display: flex;
       flex-wrap: wrap;
@@ -109,7 +109,7 @@
       appearance: none;
       -webkit-appearance: none;
       -moz-appearance: none;
-      border: 2px solid #333; /* 未选中时黑色边框 */
+      border: 2px solid #333;
       border-radius: 50%;
       background-color: transparent;
       position: relative;
@@ -117,8 +117,8 @@
     }
 
     .radio-label input[type="radio"]:checked {
-      border-color: white; /* 选中时白色边框 */
-      background-color: #0ABAB5; /* 蒂芙尼蓝背景 */
+      border-color: white;
+      background-color: #0ABAB5;
     }
 
     .radio-label input[type="radio"]:checked::after {
@@ -130,10 +130,10 @@
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background-color: white; /* 内部白色圆点 */
+      background-color: white;
     }
 
-    /* 标签页样式 */
+    /* Tabs */
     .tabs {
       display: flex;
       border-bottom: 2px solid #e8eaed;
@@ -172,7 +172,7 @@
       display: block;
     }
 
-    /* 标签页内容 */
+    /* Tab content */
     .tab-content textarea {
       min-height: 120px;
       font-size: 13px;
@@ -201,7 +201,7 @@
       cursor: not-allowed;
     }
 
-    /* 文件上传样式 */
+    /* File upload */
     .file-input-wrapper {
       position: relative;
       display: inline-block;
@@ -217,7 +217,7 @@
       font-size: 13px;
     }
 
-    /* 底部固定栏（Sticky Footer） */
+    /* Sticky footer */
     .footer {
       border-top: 1px solid #e8eaed;
       padding: 10px 16px;
@@ -260,7 +260,7 @@
     }
     
     .footer-button:hover {
-      background-color: rgba(10, 186, 181, 1); /* 蒂芙尼蓝 100% 不透明 */
+      background-color: rgba(10, 186, 181, 1);
     }
     
     .footer-button.disabled {
@@ -278,7 +278,7 @@
       color: #6b7280;
     }
 
-    /* 大纲视图样式 */
+    /* Outline view */
     #view-outline {
       display: none;
     }
@@ -319,15 +319,15 @@
       appearance: none;
       -webkit-appearance: none;
       -moz-appearance: none;
-      border: 2px solid #0ABAB5; /* 蒂芙尼蓝边框 */
+      border: 2px solid #0ABAB5;
       border-radius: 3px;
       background-color: transparent;
       position: relative;
-      transition: none; /* 取消hover效果 */
+      transition: none;
     }
 
     .outline-item input[type="checkbox"]:checked {
-      background-color: #0ABAB5; /* 选中时蒂芙尼蓝背景 */
+      background-color: #0ABAB5;
       border-color: #0ABAB5;
     }
 
@@ -337,7 +337,7 @@
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      color: white; /* 白色勾选符号 */
+      color: white;
       font-size: 14px;
       font-weight: bold;
       line-height: 1;
@@ -371,7 +371,7 @@
       outline: none;
     }
 
-    /* 自定义主题"+"按钮hover效果：从30%透明度转为100% */
+    /* Custom topic "+" button hover */
     #btnAddCustomTopic {
       background-color: rgba(10, 186, 181, 0.3) !important;
     }
@@ -425,7 +425,7 @@
       display: inline-block;
       padding: 10px 20px;
       background-color: #0ABAB5;
-      color: white; /* 白色文字 */
+      color: white;
       text-decoration: none;
       font-weight: bold;
       border-radius: 4px;
@@ -498,14 +498,14 @@
     }
 
     .header-summary-edit {
-      display: none; /* 使用右上角独立按钮控制展开/收起，避免文案重复 */
+      display: none;
     }
 
     .header-summary-main {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: calc(100% - 80px); /* 适配 Side Panel 窄屏，留出右侧按钮空间 */
+      max-width: calc(100% - 80px);
     }
 
     .header-summary-edit {
@@ -551,10 +551,10 @@
 
   <h3>Cheat Sheet Maker</h3>
 
-  <!-- 表单视图 -->
+  <!-- Form view -->
   <div id="view-form">
     <div class="main-content">
-      <!-- 可折叠基础信息 Header -->
+      <!-- Collapsible header -->
       <div class="header-accordion" id="headerAccordion">
         <button id="toggleHeaderBtn" class="header-toggle-btn" type="button">Collapse</button>
         <div class="header-summary" id="headerSummary">
@@ -613,26 +613,26 @@
         </div>
       </div>
 
-      <!-- 标签页 -->
+      <!-- Tabs -->
       <div class="tabs">
         <button class="tab active" data-tab="current-page">Scan</button>
         <button class="tab" data-tab="paste-text">Paste</button>
         <button class="tab" data-tab="upload-pdf">PDF</button>
       </div>
 
-      <!-- 标签页内容：当前页面 -->
+      <!-- Tab: scan current page -->
       <div id="tab-current-page" class="tab-content active">
         <p style="font-size: 12px; color: #6b7280; margin-bottom: 8px; line-height: 1.4;">
           <strong>GPT Chatbox ONLY!</strong> 
           Capture content to knowledge base.
-          <span style="display: block; margin-top: 4px; color: #ef4444;">
-            ⚠️ If page auto-scrolling doesn't work, please refresh the page and try again.
+          <span style="display: block; margin-top: 4px; color: #7c3aed;">
+            💡 Tip: Scan key materials multiple times for better results.
           </span>
         </p>
         <button id="btnScanPage">Scan &amp; Add to KB</button>
       </div>
 
-      <!-- 标签页内容：粘贴文本 -->
+      <!-- Tab: paste text -->
       <div id="tab-paste-text" class="tab-content">
         <div class="form-group">
           <label class="section-title" for="pasteTextInput">Paste Text</label>
@@ -641,7 +641,7 @@
         <button id="btnSaveText">Save &amp; Add to KB</button>
       </div>
 
-      <!-- 标签页内容：上传PDF -->
+      <!-- Tab: upload PDF -->
       <div id="tab-upload-pdf" class="tab-content">
         <div class="form-group">
           <label class="section-title" for="pdfFileInput">Select PDF File</label>
@@ -653,7 +653,7 @@
       </div>
     </div>
 
-    <!-- 底部固定栏 -->
+    <!-- Sticky footer -->
     <div class="footer">
       <div class="footer-left">
         <button id="btnReset" class="reset-btn" title="Clear the knowledge base for the current user">🗑 Clear</button>
@@ -666,13 +666,13 @@
     </div>
   </div>
 
-  <!-- 大纲视图 -->
+  <!-- Outline view -->
   <div id="view-outline">
     <div class="main-content">
       <h4>Detected Exam Topics (Please Check)</h4>
       <div id="outline-list"></div>
       
-      <!-- 自定义主题输入 -->
+      <!-- Custom topic input -->
       <div class="custom-topic-group">
         <div style="display: flex; gap: 8px;">
           <input 
@@ -706,6 +706,7 @@
   </div>
 
   <script src="formPersistence.js"></script>
+  <script src="api-config.js"></script>
   <script src="config.js"></script>
   <script src="popup.js"></script>
 </body>

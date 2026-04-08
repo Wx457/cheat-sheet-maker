@@ -1,0 +1,15 @@
+# Development overrides — hot reload + source mount.
+# This file is auto-merged by `docker compose up` (no -f flag).
+# Production deployments MUST use: docker compose -f docker-compose.yml ...
+version: '3.8'
+
+services:
+  backend:
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+
+  worker:
+    command: arq app.worker.WorkerSettings --watch app
+    volumes:
+      - ./backend:/app

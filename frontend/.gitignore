@@ -1,3 +1,5 @@
+# Frontend-specific (node_modules, dist, etc.); repo-wide rules → root /.gitignore
+
 # Logs
 logs
 *.log

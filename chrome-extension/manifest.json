@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Cheat Sheet Generator",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Instantly turn GPT chats, text, and PDFs into beautiful, exam-ready cheat sheets with AI.",
   "permissions": [
     "activeTab",

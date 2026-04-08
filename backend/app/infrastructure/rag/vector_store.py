@@ -19,10 +19,16 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+class QuotaExceededError(Exception):
+    """Raised when a user's knowledge base has reached its chunk limit."""
+
+
 class IngestResult(TypedDict):
     chunks_count: int
     ingest_batch_id: str
     ingest_at: datetime
+    truncated: bool
+    original_chunks_count: int
 
 
 class VectorStore:
@@ -120,8 +126,27 @@ class VectorStore:
             user_id: 用户隔离 ID
             metadata: 可选完整元数据字典（用于上下文增强）
         """
-        # 1. 文本切分
+        # 1. Split text
         chunks = self.text_splitter.split_text(raw_text)
+        original_chunks_count = len(chunks)
+        truncated = False
+
+        # 1b. Enforce per-ingest limit
+        if len(chunks) > settings.MAX_CHUNKS_PER_INGEST:
+            chunks = chunks[: settings.MAX_CHUNKS_PER_INGEST]
+            truncated = True
+
+        # 1c. Enforce per-user total limit
+        existing_count = await asyncio.to_thread(self.get_user_chunk_count, user_id)
+        remaining = settings.MAX_CHUNKS_PER_USER - existing_count
+        if remaining <= 0:
+            raise QuotaExceededError(
+                f"Knowledge base full ({existing_count}/{settings.MAX_CHUNKS_PER_USER} chunks). "
+                "Clear some data before adding more."
+            )
+        if len(chunks) > remaining:
+            chunks = chunks[:remaining]
+            truncated = True
 
         # 2. 构建元数据
         ingest_batch_id = uuid4().hex
@@ -165,6 +190,8 @@ class VectorStore:
             "chunks_count": len(documents_to_insert),
             "ingest_batch_id": ingest_batch_id,
             "ingest_at": ingest_at,
+            "truncated": truncated,
+            "original_chunks_count": original_chunks_count,
         }
 
     async def ingest_pdf(
@@ -258,6 +285,31 @@ class VectorStore:
             lambda: vector_store.similarity_search_with_score(query, k=1, pre_filter=pre_filter),
         )
         return len(results) > 0
+
+    def find_chunks_by_user(self, user_id: str, limit: int = 10) -> List[dict]:
+        """Plain MongoDB find() — bypasses the vector index entirely.
+
+        Used as a last-resort fallback when the Atlas vector index has not
+        finished building and similarity_search returns nothing.
+        Returns the most recently ingested chunks for the given user.
+        """
+        cursor = self._run_with_retry(
+            "find_chunks_by_user",
+            lambda: self.collection.find(
+                {"metadata.user_id": {"$eq": user_id}},
+                {"page_content": 1, "metadata.source": 1, "_id": 0},
+            )
+            .sort("metadata.created_at", -1)
+            .limit(limit),
+        )
+        return [
+            {
+                "content": doc.get("page_content", ""),
+                "source": (doc.get("metadata") or {}).get("source", "unknown"),
+                "score": 0.0,
+            }
+            for doc in cursor
+        ]
 
     def get_user_chunk_count(self, user_id: str) -> int:
         """获取指定用户的 chunks 数量。"""

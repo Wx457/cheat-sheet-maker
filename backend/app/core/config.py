@@ -24,8 +24,8 @@ class Settings:
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
     # RAG 检索重试配置（处理向量索引最终一致性延迟）
-    RAG_RETRY_ATTEMPTS: int = int(os.getenv("RAG_RETRY_ATTEMPTS", "5"))
-    RAG_RETRY_DELAY_SECONDS: int = int(os.getenv("RAG_RETRY_DELAY_SECONDS", "3"))
+    RAG_RETRY_ATTEMPTS: int = int(os.getenv("RAG_RETRY_ATTEMPTS", "6"))
+    RAG_RETRY_DELAY_SECONDS: int = int(os.getenv("RAG_RETRY_DELAY_SECONDS", "2"))
 
     # LLM / Embedding 调用重试配置
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
@@ -34,6 +34,16 @@ class Settings:
     )
     LLM_MAX_RETRY_DELAY_SECONDS: float = float(os.getenv("LLM_MAX_RETRY_DELAY_SECONDS", "60"))
     LLM_REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "120"))
+
+    # Embedding sub-batching (avoids rate-limit on large ingestions)
+    EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "100"))
+    EMBEDDING_BATCH_DELAY_SECONDS: float = float(
+        os.getenv("EMBEDDING_BATCH_DELAY_SECONDS", "0.5")
+    )
+
+    # Ingestion quota
+    MAX_CHUNKS_PER_USER: int = int(os.getenv("MAX_CHUNKS_PER_USER", "500"))
+    MAX_CHUNKS_PER_INGEST: int = int(os.getenv("MAX_CHUNKS_PER_INGEST", "200"))
 
     # AWS S3 配置
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")

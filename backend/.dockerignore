@@ -1,13 +1,22 @@
+# Python / local
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-
+*.py[cod]
+*$py.class
 venv/
 .venv/
 env/
 .env
 
+# Version control (not needed in image)
+.git/
+.gitignore
+
+# Tests & static analysis (not needed at runtime)
+tests/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Docs & local drafts (reduce build context)
+*.md
 tipstxt/
-PROJECT_ARCHITECTURE.md
-README.md

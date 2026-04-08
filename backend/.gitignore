@@ -1,11 +1,21 @@
+# Backend-specific (Python, venv, tool caches); secrets & OS files → root /.gitignore
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.pyo
 *.pyd
 
+# Virtual environments
 venv/
 .venv/
 env/
-.env
 
+# Local notes / drafts (backend only)
 tipstxt/
+
+# Tool caches (image build → see .dockerignore)
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
