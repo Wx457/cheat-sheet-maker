@@ -185,7 +185,7 @@ class CheatSheetService:
             cleaned_text, combined_context if combined_context else None, exam_type
         )
 
-        response_text = self.gemini.generate_text(prompt)
+        response_text = self.gemini.generate_text(prompt, response_schema=OutlineResponse)
 
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
@@ -325,7 +325,7 @@ class CheatSheetService:
         )
 
         # 4) llm
-        response_text = self.gemini.generate_text(prompt)
+        response_text = self.gemini.generate_text(prompt, response_schema=CheatSheetSchema)
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
 

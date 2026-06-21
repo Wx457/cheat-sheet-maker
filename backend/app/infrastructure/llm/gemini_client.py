@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Optional, Type
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -18,14 +19,23 @@ class GeminiClient:
         if not api_key:
             raise ValueError("GOOGLE_API_KEY not found in environment variables")
         genai.configure(api_key=api_key)
+        self.model_name = model_name
         self.model = genai.GenerativeModel(
             model_name=model_name,
             generation_config={"response_mime_type": "application/json"},
         )
 
-    def _call(self, prompt: str):
+    def _call(self, prompt: str, response_schema: Optional[Type] = None):
         def _wrapped():
             try:
+                if response_schema is not None:
+                    generation_config = {
+                        "response_mime_type": "application/json",
+                        "response_schema": response_schema,
+                    }
+                    return self.model.generate_content(
+                        prompt, generation_config=generation_config
+                    )
                 return self.model.generate_content(prompt)
             except Exception as exc:  # noqa: PERF203
                 if "timeout" in str(exc).lower() or "deadline" in str(exc).lower():
@@ -36,8 +46,15 @@ class GeminiClient:
 
         return run_with_exponential_backoff("Gemini generate_content", _wrapped)
 
-    def generate_text(self, prompt: str) -> str:
-        response = self._call(prompt)
+    def generate_text(self, prompt: str, response_schema: Optional[Type] = None) -> str:
+        """Generate text, optionally constraining output to a Pydantic schema.
+
+        When *response_schema* is provided the Gemini API enforces the JSON
+        structure at decode time, eliminating format errors at the source.
+        The caller's repair / Pydantic-validation layers remain untouched as
+        a safety net.
+        """
+        response = self._call(prompt, response_schema=response_schema)
         return response.text
 
     def generate_json(self, prompt: str) -> dict:
