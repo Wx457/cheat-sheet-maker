@@ -46,6 +46,9 @@ pypdf==6.5.0
 # AWS S3 Storage
 boto3==1.35.0
 
+# BM25 keyword search (fallback retrieval)
+rank-bm25==0.2.2
+
 # Utilities
 python-dotenv==1.2.1
 pydantic==2.12.5

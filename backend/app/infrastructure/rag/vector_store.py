@@ -9,6 +9,7 @@ from uuid import uuid4
 from pymongo import MongoClient
 from pymongo import errors as pymongo_errors
 from pypdf import PdfReader
+from rank_bm25 import BM25Okapi
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -286,13 +287,52 @@ class VectorStore:
         )
         return len(results) > 0
 
-    def find_chunks_by_user(self, user_id: str, limit: int = 10) -> List[dict]:
-        """Plain MongoDB find() — bypasses the vector index entirely.
+    def find_chunks_by_user(
+        self, user_id: str, limit: int = 10, query: Optional[str] = None
+    ) -> List[dict]:
+        """BM25-ranked fallback — bypasses the vector index entirely.
 
-        Used as a last-resort fallback when the Atlas vector index has not
-        finished building and similarity_search returns nothing.
-        Returns the most recently ingested chunks for the given user.
+        When *query* is provided, fetches all user chunks and re-ranks them
+        with BM25Okapi (keyword scoring), returning the top *limit* results
+        with their BM25 scores.  This is strictly better than time-ordering
+        because it at least aligns the fallback context with the query topic.
+
+        When *query* is absent (e.g. called without a search term), falls back
+        to the original time-based ordering for backward compatibility.
+
+        Used as a last-resort when the Atlas vector index has not finished
+        building and similarity_search returns nothing.
         """
+        if query:
+            docs = list(
+                self._run_with_retry(
+                    "find_chunks_by_user_bm25",
+                    lambda: self.collection.find(
+                        {"metadata.user_id": {"$eq": user_id}},
+                        {"page_content": 1, "metadata.source": 1, "_id": 0},
+                    ),
+                )
+            )
+            if not docs:
+                return []
+
+            texts = [doc.get("page_content", "") for doc in docs]
+            tokenized_corpus = [text.lower().split() for text in texts]
+            tokenized_query = query.lower().split()
+            bm25 = BM25Okapi(tokenized_corpus)
+            scores = bm25.get_scores(tokenized_query)
+
+            ranked = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)[:limit]
+            return [
+                {
+                    "content": doc.get("page_content", ""),
+                    "source": (doc.get("metadata") or {}).get("source", "unknown"),
+                    "score": float(score),
+                }
+                for doc, score in ranked
+            ]
+
+        # No query: original time-based ordering (backward compat)
         cursor = self._run_with_retry(
             "find_chunks_by_user",
             lambda: self.collection.find(

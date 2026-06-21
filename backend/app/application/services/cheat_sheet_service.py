@@ -44,7 +44,7 @@ class CheatSheetService:
             rag_service=get_vector_store(),
             storage_client=get_minio_client(),
         )
-
+    # outline搜索：尽量保证最新batchid -> vector search+重试 -> fallback数据库普通查询
     async def _search_context_with_retry(
         self,
         query: str,
@@ -106,7 +106,7 @@ class CheatSheetService:
                 user_id,
                 required_batch_id,
             )
-
+            # 仅当向量搜索返回0条时触发
             if attempt < max_attempts:
                 delay = min(base_delay * (2 ** (attempt - 1)), 30)
                 await asyncio.sleep(delay)
@@ -118,7 +118,7 @@ class CheatSheetService:
             user_id,
         )
         fallback = await asyncio.to_thread(
-            self.rag_service.find_chunks_by_user, user_id, k
+            self.rag_service.find_chunks_by_user, user_id, k, query
         )
         if fallback:
             logger.info(
@@ -128,6 +128,7 @@ class CheatSheetService:
             logger.warning("MongoDB fallback also returned 0 chunks for user_id=%s", user_id)
         return fallback
 
+    # outline生成：(区别处理outline搜索结果)扔给LLM生成大纲
     async def generate_outline(
         self,
         text: str,
@@ -301,11 +302,11 @@ class CheatSheetService:
         if request_data.syllabus:
             cleaned_syllabus = clean_raw_text(request_data.syllabus)
             syllabus_instruction = f"""
-[Syllabus Filter Instruction]
-User provided the following syllabus as content filtering guide:
-{cleaned_syllabus}
-[End of Syllabus Filter Instruction]
-"""
+            [Syllabus Filter Instruction]
+            User provided the following syllabus as content filtering guide:
+            {cleaned_syllabus}
+            [End of Syllabus Filter Instruction]
+            """
         topics_str = (
             "\n".join([f"- {t.title}" for t in request_data.selected_topics])
             if request_data.selected_topics

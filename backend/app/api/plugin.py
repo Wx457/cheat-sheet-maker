@@ -219,7 +219,7 @@ async def plugin_generate_final(
     """
     Chrome 插件：生成最终 PDF 内容
 
-    现在改为异步任务模式：
+    异步任务模式：
     1. 将生成任务推送到 Redis 队列
     2. 立即返回 task_id
     3. Worker 会处理任务，生成小抄并保存到数据库

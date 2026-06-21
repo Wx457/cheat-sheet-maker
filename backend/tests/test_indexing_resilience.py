@@ -96,7 +96,7 @@ class TestSearchContextWithRetry:
         assert len(result) == 1
         assert result[0]["content"] == "fallback content"
         assert svc.rag_service.search_context.await_count == 3
-        svc.rag_service.find_chunks_by_user.assert_called_once_with("u1", 5)
+        svc.rag_service.find_chunks_by_user.assert_called_once_with("u1", 5, "q")
 
     @pytest.mark.asyncio
     async def test_fallback_also_empty_returns_empty(self):
@@ -155,6 +155,7 @@ class TestFindChunksByUser:
     """Verify VectorStore.find_chunks_by_user returns properly formatted results."""
 
     def test_returns_formatted_chunks(self):
+        """No-query path: time-based ordering, score=0.0."""
         with patch.object(VectorStore, "__init__", lambda self: None):
             vs = VectorStore()
 
@@ -178,3 +179,48 @@ class TestFindChunksByUser:
         assert len(result) == 2
         assert result[0] == {"content": "chunk A", "source": "s1", "score": 0.0}
         assert result[1] == {"content": "chunk B", "source": "s2", "score": 0.0}
+
+    def test_bm25_ranks_by_query_relevance(self):
+        """BM25 path: query-relevant chunks ranked first with non-zero scores."""
+        with patch.object(VectorStore, "__init__", lambda self: None):
+            vs = VectorStore()
+
+        vs.mongo_retry_attempts = 1
+        vs.mongo_retry_base_delay_seconds = 0
+        vs.retryable_errors = ()
+
+        mock_docs = [
+            {"page_content": "cooking recipes food kitchen", "metadata": {"source": "s1"}},
+            {"page_content": "eigenvalue decomposition matrix algebra", "metadata": {"source": "s2"}},
+            {"page_content": "matrix operations linear algebra eigenvalue", "metadata": {"source": "s3"}},
+        ]
+
+        vs.collection = MagicMock()
+        vs.collection.find.return_value = iter(mock_docs)
+        vs._run_with_retry = MagicMock(side_effect=lambda name, op: op())
+
+        result = vs.find_chunks_by_user("user-1", limit=2, query="eigenvalue matrix")
+
+        assert len(result) == 2
+        # BM25 should put the math-related chunks ahead of the cooking chunk
+        assert result[0]["source"] in ("s2", "s3")
+        assert result[1]["source"] in ("s2", "s3")
+        # Scores should be positive (keyword overlap exists)
+        assert result[0]["score"] > 0.0
+
+    def test_bm25_returns_empty_when_no_docs(self):
+        """BM25 path with empty collection returns empty list without error."""
+        with patch.object(VectorStore, "__init__", lambda self: None):
+            vs = VectorStore()
+
+        vs.mongo_retry_attempts = 1
+        vs.mongo_retry_base_delay_seconds = 0
+        vs.retryable_errors = ()
+
+        vs.collection = MagicMock()
+        vs.collection.find.return_value = iter([])
+        vs._run_with_retry = MagicMock(side_effect=lambda name, op: op())
+
+        result = vs.find_chunks_by_user("user-1", limit=5, query="some query")
+
+        assert result == []
