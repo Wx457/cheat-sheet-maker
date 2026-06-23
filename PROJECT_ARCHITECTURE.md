@@ -61,7 +61,7 @@ cheat-sheet-maker/
 │   │   ├── infrastructure/           # Low-level clients (Infrastructure Layer)
 │   │   │   ├── llm/
 │   │   │   │   ├── gemini_client.py
-│   │   │   │   │   └── GeminiClient.generate_text()/generate_json() # Gemini call with retry
+│   │   │   │   │   └── GeminiClient.generate_text()/generate_json() # Gemini call with retry; generate_text() accepts optional response_schema (Pydantic model) for structured JSON output enforcement
 │   │   │   │   └── openai_client.py
 │   │   │   │       └── OpenAIClient.embed_documents()/embed_query() # OpenAI Embedding (auto sub-batching)
 │   │   │   ├── pdf/renderer.py
@@ -69,7 +69,7 @@ cheat-sheet-maker/
 │   │   │   ├── rag/vector_store.py
 │   │   │   │   ├── VectorStore.ingest_text()/ingest_pdf() # Chunk → quota check/truncate → vectorize → MongoDB
 │   │   │   │   ├── search_context_mmr()/search_context() # user_id-based retrieval/MMR deduplication
-│   │   │   │   ├── find_chunks_by_user()             # Plain MongoDB fallback (bypasses vector index)
+│   │   │   │   ├── find_chunks_by_user()             # BM25 keyword-ranked fallback (bypasses vector index; falls back to time-order when no query provided)
 │   │   │   │   ├── delete_user_data()/clear_vector_data() # User/full vector cleanup
 │   │   │   │   └── get_vector_store() # Singleton get VectorStore
 │   │   │   └── storage/minio_client.py
@@ -259,6 +259,30 @@ User Request
 [Get Presigned Download URL] (download_url)
 ```
 
+### Async Task Interaction Sequence
+
+```
+Chrome Ext / Frontend    backend (FastAPI)         Redis            ARQ Worker
+        │                        │                    │                  │
+        │── POST /api/generate ─▶│                    │                  │
+        │   (user submits)        │── enqueue_job ────▶│                  │
+        │                        │                    │◀── poll ─────────│
+        │◀── {task_id: "abc123"} ─│                    │── job args ─────▶│
+        │    (ms-level response)  │                    │                  │── RAG retrieval
+        │                        │                    │                  │── LLM (Gemini)
+        │── GET /task/abc123 ───▶│── job.status() ───▶│                  │── PDF (Playwright)
+        │◀── {status:"processing"}│                    │                  │── S3 upload
+        │    (poll every ~2s)     │                    │◀── store result ─│
+        │── GET /task/abc123 ───▶│◀── job.result() ───│                  │
+        │◀── {status:"completed", │                    │                  │
+        │     download_url: "…"} │                    │                  │
+```
+
+**Why this pattern:**
+- Backend returns `task_id` in milliseconds — no HTTP timeout risk regardless of LLM/PDF latency
+- Worker runs in a separate container; failures are isolated and do not affect the API server
+- Client polls `/api/task/{task_id}`; on completion the API generates a short-lived S3 presigned URL for PDF download
+
 ## 🛠️ Technology Stack
 
 ### Backend
@@ -272,8 +296,9 @@ User Request
 - **LLM**: Google Gemini 2.5 Flash
 - **Vector Storage**: MongoDB Atlas Vector Search
 - **Retrieval Algorithms**: 
-  - Similarity Search - for Outline generation
+  - Similarity Search (cosine, Atlas Vector Search) - for Outline generation
   - MMR (Maximal Marginal Relevance) - for Cheat Sheet generation, reduces redundancy
+  - BM25 keyword ranking (`rank-bm25`) - last-resort fallback when vector index is unavailable; query-aware, ranks by term frequency rather than recency
 - **PDF Processing**: Playwright (Headless Chrome)
 - **Text Processing**: LangChain
 - **S3 Client**: boto3
@@ -355,7 +380,7 @@ User Request
 ### MongoDB Topology Changes
 - During replica set elections/upgrades, brief `NoPrimary`/selection timeouts are expected.
 - App-level mitigation: retry with exponential backoff in vector store operations (insert/search/count/delete).
-- Outline-generation-specific mitigation: when Atlas vector indexing is not finished and retrieval returns 0 chunks, service retries with **exponential backoff** via `_search_context_with_retry()`, then falls back to a **plain MongoDB `find()` query** (bypassing the vector index) before giving up.
+- Outline-generation-specific mitigation: when Atlas vector indexing is not finished and retrieval returns 0 chunks, service retries with **exponential backoff** via `_search_context_with_retry()`, then falls back to a **BM25 keyword-ranked query** (`find_chunks_by_user()`) that bypasses the vector index — returning query-relevant chunks by term frequency rather than a blind time-ordered list.
 - Batch-ID gating:
   - Each ingest writes `metadata.ingest_batch_id`.
   - Frontend stores `lastIngestBatchId` and sends it to `/api/outline`.

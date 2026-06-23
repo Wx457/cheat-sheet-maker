@@ -136,7 +136,7 @@ This project is a production-grade AI Agent infrastructure designed to handle hi
     * **Solution**: Implemented a custom `init` process to properly reap defunct child processes. Integrated `tini` for correct Unix signal forwarding (SIGTERM/SIGINT), ensuring zero-downtime scaling and clean resource deallocation.
 * **High-Concurrency Task Pipeline**: 
     * **Architecture**: Designed a **Producer-Consumer pattern** using **FastAPI (asyncio)** and **ARQ (Redis-backed)**.
-    * **Optimization**: Implemented **Read-after-write consistency** for asynchronous vector indexing using Batch-ID tracking with **exponential-backoff polling** and a **plain-MongoDB fallback**, ensuring that users can immediately query newly ingested knowledge without race conditions or silent degradation.
+    * **Optimization**: Implemented **Read-after-write consistency** for asynchronous vector indexing using Batch-ID tracking with **exponential-backoff polling** and a **BM25 keyword-ranked fallback** (bypasses the vector index entirely), ensuring that users can immediately query newly ingested knowledge without race conditions or silent degradation.
 
 ### 2. High-Performance RAG Architecture
 * **Latency Reduction (15s → 3s)**: 
