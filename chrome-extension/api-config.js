@@ -10,7 +10,13 @@
  */
 ;(function initApiConfig() {
   window.API_CONFIG = {
+    // ── FastAPI 后端 ──────────────────────────────────────────────────────────
     LOCAL_API_ORIGIN: 'http://localhost:8000',
     PRODUCTION_API_ORIGIN: 'http://18.189.87.197:8000',
+
+    // ── Next.js Web App ───────────────────────────────────────────────────────
+    // TODO: 部署后将 PRODUCTION_WEBAPP_URL 替换为真实域名
+    LOCAL_WEBAPP_URL: 'http://localhost:3000',
+    PRODUCTION_WEBAPP_URL: 'https://your-app.com',
   }
 })()

@@ -185,7 +185,7 @@ class CheatSheetService:
             cleaned_text, combined_context if combined_context else None, exam_type
         )
 
-        response_text = self.gemini.generate_text(prompt, response_schema=OutlineResponse)
+        response_text = self.gemini.generate_text(prompt)
 
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
@@ -224,7 +224,7 @@ class CheatSheetService:
             return str(insert_result.inserted_id)
         finally:
             client.close()
-
+# TODO: 需要修改，支持流式生成
     async def create_cheat_sheet_flow(
         self,
         request_data: GenerateSheetRequest,
@@ -370,3 +370,220 @@ class CheatSheetService:
         if project_id:
             result["project_id"] = project_id
         return result
+
+
+    async def stream_cheat_sheet_sections(
+        self,
+        request_data: "GenerateSheetRequest",
+        user_id: str,
+    ):
+        """
+        流式 Cheat Sheet 生成器，供 SSE 端点使用。
+        Yields SSE 格式字符串（已含 "data: ...\n\n" 前缀）。
+        
+        注意：此方法跳过 PDF 生成和 S3 上传（流式场景不需要）。
+        """
+        import asyncio, json as _json
+
+        # --- 步骤 1-3：与 create_cheat_sheet_flow 完全相同 ---
+        # 1) budget
+        if not request_data.selected_topics:
+            default_topics = [TopicInput(title="General Topics", relevance_score=1.0)]
+            budget_map = BudgetRule.calculate(request_data.page_limit.value, default_topics)
+            section_plan = "- General Topics (Target: ~{} items)".format(
+                budget_map["General Topics"]
+            )
+        else:
+            budget_map = BudgetRule.calculate(
+                request_data.page_limit.value, request_data.selected_topics
+            )
+            section_plan = "\n".join(
+                [
+                    f"- {t.title} (Target: ~{budget_map.get(t.title, 3)} items)"
+                    for t in request_data.selected_topics
+                ]
+            )
+
+        total_items = sum(budget_map.values())
+
+        # 2) RAG context
+        rag_context_str = ""
+
+        if request_data.selected_topics:
+            import asyncio
+
+            search_tasks = [
+                self.rag_service.search_context_mmr(topic.title, user_id=user_id, k=3, fetch_k=10)
+                for topic in request_data.selected_topics
+            ]
+            all_results = await asyncio.gather(*search_tasks)
+
+            seen = set()
+            for topic, results in zip(request_data.selected_topics, all_results):
+                if results:
+                    rag_context_str += f"\n--- Context for topic '{topic.title}' ---\n"
+                    for r in results:
+                        h = hash((r.get("content") or "").strip())
+                        if h in seen:
+                            continue
+                        seen.add(h)
+                        rag_context_str += f"Source: {r['source']}\n"
+                        rag_context_str += f"Content: {r['content']}\n"
+                        rag_context_str += "---------------------------------------\n"
+        else:
+            archetype = request_data.archetype.value if request_data.archetype else "general"
+            query = request_data.user_context or archetype or "general knowledge"
+
+            results = await self.rag_service.search_context(query, user_id=user_id, k=10)
+
+            if results:
+                rag_context_str += "\n--- General Knowledge Base Context ---\n"
+                for r in results:
+                    rag_context_str += f"Source: {r['source']}\n"
+                    rag_context_str += f"Content: {r['content']}\n"
+                    rag_context_str += "---------------------------------------\n"
+
+        # 3) prompt
+        exam_type_context = {
+            ExamType.quiz: "Quiz",
+            ExamType.midterm: "Midterm",
+            ExamType.final: "Final",
+        }.get(request_data.exam_type, "Final")
+        syllabus_instruction = ""
+        if request_data.syllabus:
+            cleaned_syllabus = clean_raw_text(request_data.syllabus)
+            syllabus_instruction = f"""
+            [Syllabus Filter Instruction]
+            User provided the following syllabus as content filtering guide:
+            {cleaned_syllabus}
+            [End of Syllabus Filter Instruction]
+            """
+        topics_str = (
+            "\n".join([f"- {t.title}" for t in request_data.selected_topics])
+            if request_data.selected_topics
+            else "未指定"
+        )
+        prompt = CheatSheetPrompts.render_cheatsheet_prompt(
+            exam_type_context=exam_type_context,
+            rag_context_str=rag_context_str,
+            syllabus_instruction=syllabus_instruction,
+            section_plan=section_plan,
+            total_items=total_items,
+            page_limit=request_data.page_limit.value,
+            academic_level=request_data.academic_level.value,
+            archetype=(request_data.archetype.value if request_data.archetype else "general"),
+            selected_topics_str=topics_str,
+        )
+
+        # --- 步骤 4：流式 LLM 调用 + NDJSON 解析 ---
+        buffer = ""
+
+        # generate_text_stream 是同步生成器，用 run_in_executor 包到线程池
+        loop = asyncio.get_event_loop()
+
+        def _collect_stream():
+            """在线程里收集流式 chunk，放入同步队列。"""
+            import queue as _q
+            q = _q.Queue()
+            try:
+                for text in self.gemini.generate_text_stream(prompt):
+                    q.put(text)
+            finally:
+                q.put(None)  # 哨兵：流结束
+            return q
+
+        # 在线程池里运行同步流
+        sync_queue = await loop.run_in_executor(None, _collect_stream)
+
+        # 从同步队列取 chunk，解析 NDJSON
+        # Gemini 实际输出的是「扁平格式」：section header 和每条 item 各占一行。
+        # 例：
+        #   {"title": "EM Algorithm"}
+        #   {"type": "text", "content": "..."}
+        #   {"type": "equation", "content": "..."}
+        #   {"title": "GMM"}
+        #   ...
+        # 解析器需将每个 section 的 items 归并后再一次性 yield，
+        # 同时兼容「正确格式」（title + items 同行）。
+        current_section: dict | None = None
+
+        def _try_yield_current():
+            """将当前 section（已收集好 items）序列化为 SSE 行并返回，供 caller yield。"""
+            if current_section is not None:
+                return f"data: {_json.dumps(current_section)}\n\n"
+            return None
+
+        def _process_line(raw_line: str):
+            """
+            解析一行 NDJSON，根据结构分类：
+              - meta 行   → 直接 yield
+              - section 行（有 title，无 type）→ 先 yield 前一个 section，开始新 section
+              - item 行（有 type + content）→ 追加到当前 section 的 items
+              - 完整格式（title + items 同行）→ 先 yield 前一个 section，再 yield 本行
+            返回值：需要立即 yield 的 SSE 字符串列表
+            """
+            nonlocal current_section
+            to_yield = []
+            raw_line = raw_line.strip()
+            if not raw_line:
+                return to_yield
+            try:
+                obj = _json.loads(raw_line)
+            except _json.JSONDecodeError:
+                return to_yield  # 不完整或无效行，忽略
+
+            if not isinstance(obj, dict):
+                return to_yield
+
+            # ── meta 行 ────────────────────────────────────────────────
+            if obj.get("_type") == "meta":
+                to_yield.append(f"data: {_json.dumps(obj)}\n\n")
+                return to_yield
+
+            # ── 完整格式：title + items 在同一行 ────────────────────────
+            if "title" in obj and "items" in obj:
+                ev = _try_yield_current()
+                if ev:
+                    to_yield.append(ev)
+                current_section = None
+                to_yield.append(f"data: {_json.dumps(obj)}\n\n")
+                return to_yield
+
+            # ── section header（扁平格式）：有 title，无 type ────────────
+            if "title" in obj and "type" not in obj:
+                ev = _try_yield_current()
+                if ev:
+                    to_yield.append(ev)
+                current_section = {"title": obj["title"], "items": []}
+                return to_yield
+
+            # ── item（扁平格式）：有 type + content ─────────────────────
+            if "type" in obj and "content" in obj:
+                if current_section is not None:
+                    current_section["items"].append(obj)
+                # 若没有当前 section，作为孤儿 item 忽略
+                return to_yield
+
+            return to_yield
+
+        while True:
+            chunk_text = await loop.run_in_executor(None, sync_queue.get)
+            if chunk_text is None:
+                break
+            buffer += chunk_text
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                for sse in _process_line(line):
+                    yield sse
+
+        # 处理最后一行（Gemini 有时无换行结尾）
+        if buffer.strip():
+            for sse in _process_line(buffer.strip()):
+                yield sse
+
+        # 最后 flush 尚未 yield 的 section
+        ev = _try_yield_current()
+        if ev:
+            yield ev
+
+        yield "data: [DONE]\n\n"

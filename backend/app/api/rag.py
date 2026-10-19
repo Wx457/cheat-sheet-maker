@@ -1,3 +1,4 @@
+import asyncio
 import traceback
 from datetime import datetime
 
@@ -181,6 +182,27 @@ async def ingest_file(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"文件摄入时发生错误: {str(e)}")
+
+
+@router.delete("/chunks", response_model=ClearResponse)
+async def delete_user_chunks(
+    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
+) -> ClearResponse:
+    """
+    删除当前用户的知识库向量数据（用户级操作）。
+
+    仅删除 X-User-ID 对应的 chunks，不影响其他用户数据。
+    供 Chrome 插件的 "Clear KB" 按钮调用。
+    """
+    try:
+        ingestion = IngestionService.default()
+        deleted_count = await asyncio.to_thread(
+            ingestion.rag_service.delete_user_data, x_user_id
+        )
+        return ClearResponse(status="success", deleted_count=int(deleted_count))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"删除用户知识库时发生错误: {str(e)}")
 
 
 @router.post("/clear", response_model=ClearResponse)

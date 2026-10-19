@@ -134,21 +134,20 @@ Prioritize listing core formulas first, derivation/proof steps second, then use 
     * For STEM: Focus on **application and calculation**. Show standard algorithms and solving procedures.
     * For Non-STEM: Focus on **core arguments, key definitions, and cause-effect relationships**.
 
-4. Output Format: You must return pure JSON conforming to the following Schema:
-{{
-"title": "Cheat Sheet Title",
-"sections": [
-    {{
-    "title": "Section Title (corresponds to one selected_topic)",
-    "items": [
-        {{
-        "type": "text|equation|definition",
-        "content": "..."
-        }}
-    ]
-    }}
-]
-}}
+4. Output Format: NDJSON (Newline-Delimited JSON). Each line is an independent JSON object.
+
+Line 1 — meta (title line):
+{{"_type": "meta", "title": "<Cheat Sheet Title>"}}
+
+Line 2+ — one section per line:
+{{"title": "<Section Title>", "items": [{{"type": "text|equation|definition", "content": "..."}}]}}
+
+Rules:
+- Every line must be a complete, independently parseable JSON object.
+- NO wrapper object. NO "sections" array. NO Markdown. NO code fences.
+- Finish each section on exactly one line before starting the next.
+
+
 
 For mathematical formulas, you must use LaTeX format (e.g. \\\\int x dx).
 

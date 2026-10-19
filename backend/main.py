@@ -11,6 +11,7 @@ from pymongo import MongoClient
 from arq.connections import create_pool, RedisSettings
 
 from app.api import generate_router
+from app.api.auth import router as auth_router
 from app.api.rag import router as rag_router
 from app.api.plugin import router as plugin_router
 from app.api.task import router as task_router
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
 
     # 启动时：创建 MongoDB TTL 索引（幂等）
     setup_mongodb_ttl_indexes()
+    setup_users_indexes()
 
     yield
 
@@ -56,6 +58,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(generate_router)
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(plugin_router, tags=["Plugin"])
@@ -92,6 +95,29 @@ def setup_mongodb_ttl_indexes() -> None:
     except Exception as exc:
         # 记录错误，但不阻止应用启动
         print(f"⚠️ Error creating MongoDB TTL indexes: {exc}")
+    finally:
+        try:
+            if client:
+                client.close()
+        except Exception:
+            pass
+
+
+def setup_users_indexes() -> None:
+    """
+    为 users 集合创建唯一索引（email 唯一、user_id 唯一）。
+    MongoDB 会自动去重，重复调用安全。
+    """
+    client = None
+    try:
+        client = MongoClient(settings.MONGODB_URI)
+        db = client[settings.DB_NAME]
+        users = db["users"]
+        users.create_index("email", unique=True)
+        users.create_index("user_id", unique=True)
+        print("✅ MongoDB users indexes checked/created")
+    except Exception as exc:
+        print(f"⚠️ Error creating users indexes: {exc}")
     finally:
         try:
             if client:

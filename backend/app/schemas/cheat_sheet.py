@@ -72,7 +72,7 @@ class OutlineResponse(BaseModel):
 
 
 class GenerateOutlineRequest(BaseModel):
-    raw_text: str
+    raw_text: Optional[str] = None
     user_context: Optional[str] = None
     exam_type: ExamType = ExamType.final
     ingest_batch_id: Optional[str] = None

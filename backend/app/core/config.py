@@ -59,6 +59,11 @@ class Settings:
         "PDF_GENERATION_HOST", "http://localhost:8000"
     )  # Worker 进程访问 FastAPI 服务器的地址
 
+    # JWT 认证配置
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 默认 7 天
+
     @classmethod
     def validate(cls) -> None:
         """验证必需的配置项"""
@@ -66,6 +71,8 @@ class Settings:
             raise ValueError("MONGODB_URI 未在环境变量中设置")
         if not cls.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY 未在环境变量中设置")
+        if not cls.JWT_SECRET_KEY:
+            raise ValueError("JWT_SECRET_KEY 未在环境变量中设置")
 
 
 # 创建全局配置实例

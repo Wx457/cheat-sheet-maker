@@ -20,4 +20,9 @@
 
   window.IS_DEV = isDev
   window.API_BASE_URL = apiBaseUrl
+
+  // Webapp URL（用于 chrome.tabs.create 打开编辑器）
+  window.WEBAPP_URL = isDev
+    ? (cfg.LOCAL_WEBAPP_URL  || 'http://localhost:3000')
+    : (cfg.PRODUCTION_WEBAPP_URL || cfg.LOCAL_WEBAPP_URL || 'http://localhost:3000')
 })()

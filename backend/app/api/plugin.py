@@ -71,6 +71,11 @@ class TaskResponse(BaseModel):
     ingest_at: Optional[datetime] = None
 
 
+# TODO: DEPRECATED — 待删除
+# 被替代方：webapp 将拆分为两步独立调用：
+#   1. POST /api/rag/ingest       —— 文本摄入（已有端点）
+#   2. POST /api/outline          —— 大纲生成（已有端点，ARQ 异步）
+# 确认 Chrome 插件完全停用后删除此端点及下方所有实现。
 @router.post("/api/plugin/analyze", response_model=TaskResponse)
 async def plugin_analyze(
     request: Request,
@@ -210,6 +215,11 @@ async def plugin_analyze(
         )
 
 
+# TODO: DEPRECATED — 待删除
+# 被替代方：POST /api/generate/stream
+#   webapp 使用 SSE 流式端点，直接将 section 对象推送到前端，
+#   不再经过 ARQ 队列，也不再依赖 project_id / S3 存储。
+# 确认 Chrome 插件完全停用后删除此端点及下方所有实现。
 @router.post("/api/plugin/generate-final", response_model=TaskResponse)
 async def plugin_generate_final(
     request: Request,
@@ -305,6 +315,10 @@ async def plugin_generate_final(
         )
 
 
+# TODO: DEPRECATED — 待删除
+# 被替代方：webapp 流式端点直接在前端维护 sections 状态（Zustand），
+#   不再需要通过 project_id 从数据库回捞数据。
+# 确认 Chrome 插件完全停用后删除此端点及下方所有实现。
 @router.get("/api/plugin/project/{project_id}", response_model=CheatSheetSchema)
 async def get_project(project_id: str) -> CheatSheetSchema:
     """
@@ -345,6 +359,10 @@ async def get_project(project_id: str) -> CheatSheetSchema:
         )
 
 
+# TODO: DEPRECATED — 待删除
+# 被替代方：webapp 客户端 PDF 导出（Phase 5，print CSS 或 @react-pdf/renderer）。
+#   PDF 在浏览器端生成，无需后端 Playwright 渲染 + S3 存储这条链路。
+# 确认 Chrome 插件完全停用后删除此端点及下方所有实现。
 @router.get("/api/plugin/download-cheat-sheet/{project_id}")
 async def download_cheat_sheet(project_id: str) -> Response:
     """
@@ -416,22 +434,25 @@ async def download_cheat_sheet(project_id: str) -> Response:
         )
 
 
-@router.delete("/api/plugin/reset")
-async def reset_knowledge_base(
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
-) -> dict:
-    """
-    Chrome 插件：重置当前用户的知识库（向量数据）。
-    """
-    try:
-        ingestion = IngestionService.default()
-        deleted_count = await asyncio.to_thread(ingestion.rag_service.delete_user_data, x_user_id)
-        return {"status": "success", "deleted_count": int(deleted_count)}
-    except Exception as e:
-        traceback.print_exc()
-        raise _create_error_response(
-            error_type="RESET_FAILED",
-            message="Failed to reset knowledge base",
-            details=str(e),
-            status_code=500,
-        )
+# ──────────────────────────────────────────────────────────────────────────────
+# DEPRECATED & DISABLED — 已由 DELETE /api/rag/chunks 取代
+# 新端点语义更清晰（用户级别删除），且归属于正确的 rag 路由模块。
+# 此端点已注释停用；待确认全量切换后整体删除此段代码。
+# ──────────────────────────────────────────────────────────────────────────────
+# @router.delete("/api/plugin/reset")
+# async def reset_knowledge_base(
+#     x_user_id: str = Header(..., alias="X-User-ID")
+# ) -> dict:
+#     """Chrome 插件：重置当前用户的知识库（向量数据）。已废弃，请用 DELETE /api/rag/chunks。"""
+#     try:
+#         ingestion = IngestionService.default()
+#         deleted_count = await asyncio.to_thread(ingestion.rag_service.delete_user_data, x_user_id)
+#         return {"status": "success", "deleted_count": int(deleted_count)}
+#     except Exception as e:
+#         traceback.print_exc()
+#         raise _create_error_response(
+#             error_type="RESET_FAILED",
+#             message="Failed to reset knowledge base",
+#             details=str(e),
+#             status_code=500,
+#         )
