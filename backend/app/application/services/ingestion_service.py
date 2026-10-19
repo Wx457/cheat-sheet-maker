@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from app.domain.utils.cleaner import clean_raw_text
-from app.infrastructure.rag.vector_store import IngestResult, VectorStore, get_vector_store
+from app.infrastructure.rag.qdrant_store import QdrantVectorStore, get_qdrant_store
+from app.infrastructure.rag.vector_store import IngestResult
 
 
 @dataclass
@@ -13,14 +14,14 @@ class IngestionService:
     Application Layer: 摄入编排服务（文本 / PDF）。
     负责用例级流程：清洗 -> 调用向量存储写入。
 
-    说明：当前底层切分/向量化/写入由 `VectorStore`（infra）承担。
+    说明：当前底层切分/向量化/写入由 `QdrantVectorStore`（infra）承担。
     """
 
-    rag_service: VectorStore
+    rag_service: QdrantVectorStore
 
     @classmethod
     def default(cls) -> "IngestionService":
-        return cls(rag_service=get_vector_store())
+        return cls(rag_service=get_qdrant_store())
 
     async def process_text(
         self, text: str, metadata: Optional[Dict[str, Any]], user_id: str

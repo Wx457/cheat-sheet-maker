@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import cohere as _cohere
 from pymongo import MongoClient
 
 from app.core.config import settings
@@ -23,10 +24,19 @@ from app.schemas import (
 )
 from app.domain.utils.cleaner import clean_raw_text, repair_json_string, densify_item_content
 from app.infrastructure.pdf.renderer import generate_pdf_via_browser
-from app.infrastructure.rag.vector_store import VectorStore, get_vector_store
+from app.infrastructure.rag.qdrant_store import QdrantVectorStore, get_qdrant_store
 from app.infrastructure.storage.minio_client import MinIOClient, get_minio_client
 
 logger = logging.getLogger(__name__)
+
+_cohere_client_instance: Optional[_cohere.ClientV2] = None
+
+
+def _get_cohere_client() -> Optional[_cohere.ClientV2]:
+    global _cohere_client_instance
+    if _cohere_client_instance is None and settings.COHERE_API_KEY:
+        _cohere_client_instance = _cohere.ClientV2(api_key=settings.COHERE_API_KEY)
+    return _cohere_client_instance
 
 
 @dataclass
@@ -34,17 +44,41 @@ class CheatSheetService:
     """Application Layer: Cheat sheet/outline generation orchestration service (use case-level workflow)"""
 
     gemini: GeminiClient
-    rag_service: VectorStore
+    rag_service: QdrantVectorStore
     storage_client: MinIOClient
 
     @classmethod
     def default(cls) -> "CheatSheetService":
         return cls(
             gemini=GeminiClient(),
-            rag_service=get_vector_store(),
+            rag_service=get_qdrant_store(),
             storage_client=get_minio_client(),
         )
-    # outline搜索：尽量保证最新batchid -> vector search+重试 -> fallback数据库普通查询
+
+    async def _rerank_chunks(
+        self, query: str, chunks: List[dict], top_n: int
+    ) -> List[dict]:
+        """Rerank candidates with Cohere; falls back to original order if unavailable."""
+        if not chunks or len(chunks) <= top_n:
+            return chunks
+        co = _get_cohere_client()
+        if co is None:
+            return chunks[:top_n]
+        try:
+            response = await asyncio.to_thread(
+                lambda: co.rerank(
+                    model="rerank-v3.5",
+                    query=query,
+                    documents=[c["content"] for c in chunks],
+                    top_n=top_n,
+                )
+            )
+            return [chunks[r.index] for r in response.results]
+        except Exception as exc:
+            logger.warning("Cohere rerank failed, using original order: %s", exc)
+            return chunks[:top_n]
+
+    # outline搜索：尽量保证最新batchid -> vector search+重试 -> fallback BM25查询
     async def _search_context_with_retry(
         self,
         query: str,
@@ -52,8 +86,8 @@ class CheatSheetService:
         k: int = 10,
         required_batch_id: Optional[str] = None,
     ) -> List[dict]:
-        """Polling retry with exponential back-off for Atlas vector index
-        eventual consistency, plus a plain-MongoDB fallback.
+        """Polling retry with exponential back-off for vector index consistency,
+        plus a BM25 keyword fallback.
 
         Back-off schedule (base=RAG_RETRY_DELAY_SECONDS, default 2s):
             attempt 1 → 2s, attempt 2 → 4s, attempt 3 → 8s, …
@@ -111,9 +145,9 @@ class CheatSheetService:
                 delay = min(base_delay * (2 ** (attempt - 1)), 30)
                 await asyncio.sleep(delay)
 
-        # --- Fallback: plain MongoDB query (no vector index) ---
+        # --- Fallback: BM25 keyword search (no vector index) ---
         logger.warning(
-            "RAG vector search exhausted %d attempts; falling back to plain MongoDB find for user_id=%s",
+            "RAG vector search exhausted %d attempts; falling back to BM25 find for user_id=%s",
             max_attempts,
             user_id,
         )
@@ -122,10 +156,10 @@ class CheatSheetService:
         )
         if fallback:
             logger.info(
-                "MongoDB fallback returned %d chunks for user_id=%s", len(fallback), user_id
+                "BM25 fallback returned %d chunks for user_id=%s", len(fallback), user_id
             )
         else:
-            logger.warning("MongoDB fallback also returned 0 chunks for user_id=%s", user_id)
+            logger.warning("BM25 fallback also returned 0 chunks for user_id=%s", user_id)
         return fallback
 
     # outline生成：(区别处理outline搜索结果)扔给LLM生成大纲
@@ -158,7 +192,7 @@ class CheatSheetService:
             results = await self._search_context_with_retry(
                 query=query,
                 user_id=user_id,
-                k=10,
+                k=15,
                 required_batch_id=ingest_batch_id,
             )
             if ingest_batch_id and not results:
@@ -169,6 +203,7 @@ class CheatSheetService:
                 logger.warning("Outline generation degraded: %s", degraded_reason)
 
             if results:
+                results = await self._rerank_chunks(query, results, top_n=8)
                 rag_context_str = "\n--- RAG Context from Vector Database ---\n"
                 for r in results:
                     rag_context_str += f"Source: {r['source']}\n"
@@ -380,7 +415,7 @@ class CheatSheetService:
         """
         流式 Cheat Sheet 生成器，供 SSE 端点使用。
         Yields SSE 格式字符串（已含 "data: ...\n\n" 前缀）。
-        
+
         注意：此方法跳过 PDF 生成和 S3 上传（流式场景不需要）。
         """
         import asyncio, json as _json
@@ -410,10 +445,8 @@ class CheatSheetService:
         rag_context_str = ""
 
         if request_data.selected_topics:
-            import asyncio
-
             search_tasks = [
-                self.rag_service.search_context_mmr(topic.title, user_id=user_id, k=3, fetch_k=10)
+                self.rag_service.search_context(topic.title, user_id=user_id, k=10)
                 for topic in request_data.selected_topics
             ]
             all_results = await asyncio.gather(*search_tasks)
@@ -421,6 +454,7 @@ class CheatSheetService:
             seen = set()
             for topic, results in zip(request_data.selected_topics, all_results):
                 if results:
+                    results = await self._rerank_chunks(topic.title, results, top_n=3)
                     rag_context_str += f"\n--- Context for topic '{topic.title}' ---\n"
                     for r in results:
                         h = hash((r.get("content") or "").strip())
@@ -434,7 +468,8 @@ class CheatSheetService:
             archetype = request_data.archetype.value if request_data.archetype else "general"
             query = request_data.user_context or archetype or "general knowledge"
 
-            results = await self.rag_service.search_context(query, user_id=user_id, k=10)
+            results = await self.rag_service.search_context(query, user_id=user_id, k=15)
+            results = await self._rerank_chunks(query, results, top_n=8)
 
             if results:
                 rag_context_str += "\n--- General Knowledge Base Context ---\n"

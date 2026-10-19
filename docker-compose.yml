@@ -32,12 +32,16 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
       - PDF_GENERATION_HOST=http://backend:8000
       - PYTHONDONTWRITEBYTECODE=1
     env_file:
       - ./backend/.env
     depends_on:
       redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import json,sys,urllib.request; u='http://127.0.0.1:8000/health'; r=urllib.request.urlopen(u, timeout=5); body=json.loads(r.read().decode()); sys.exit(0 if body.get('status')=='ok' else 1)\""]
@@ -58,11 +62,11 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:6333/healthz', timeout=5)\""]
-      interval: 15s
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' 2>/dev/null || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 20s
+      retries: 10
+      start_period: 30s
     networks:
       - app_network
 
@@ -77,6 +81,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
       - PDF_GENERATION_HOST=http://backend:8000
       - PYTHONDONTWRITEBYTECODE=1
     env_file:

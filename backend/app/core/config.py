@@ -23,6 +23,13 @@ class Settings:
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
+    # Qdrant vector store
+    QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
+    QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
+
+    # Cohere Rerank
+    COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
+
     # RAG 检索重试配置（处理向量索引最终一致性延迟）
     RAG_RETRY_ATTEMPTS: int = int(os.getenv("RAG_RETRY_ATTEMPTS", "6"))
     RAG_RETRY_DELAY_SECONDS: int = int(os.getenv("RAG_RETRY_DELAY_SECONDS", "2"))
