@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
@@ -138,6 +139,39 @@ class GenerateFinalResponse(BaseModel):
     cheat_sheet: CheatSheetSchema
 
 
+# ── 小抄持久化（Supabase，Phase 3） ──────────────────────────────────────────
+# 不复用 ContentItem / Section：流式输出未经 schema 校验，type 可能超出 ContentType 枚举，
+# 严格校验会让整份小抄因个别条目保存失败。
+# pydantic 默认忽略多余字段，前端运行时字段（id / isStreaming）会在此被丢弃。
+
+
+class SavedItem(BaseModel):
+    type: str = Field(..., max_length=50)
+    content: str = Field(..., max_length=5000)
+
+
+class SavedSection(BaseModel):
+    title: str = Field(..., max_length=200)
+    items: List[SavedItem] = Field(default_factory=list, max_length=500)
+
+
+class CheatSheetSaveRequest(BaseModel):
+    """POST / PUT /api/cheat-sheets 请求体"""
+
+    title: str = Field("", max_length=200)
+    sections: List[SavedSection] = Field(..., max_length=100)
+
+
+class CheatSheetRecord(BaseModel):
+    """/api/cheat-sheets 响应体"""
+
+    id: str
+    title: str
+    sections: List[SavedSection]
+    created_at: datetime
+    updated_at: datetime
+
+
 __all__ = [
     "ContentType",
     "PageLimit",
@@ -155,4 +189,8 @@ __all__ = [
     "PluginAnalyzeRequest",
     "PluginGenerateRequest",
     "GenerateFinalResponse",
+    "SavedItem",
+    "SavedSection",
+    "CheatSheetSaveRequest",
+    "CheatSheetRecord",
 ]

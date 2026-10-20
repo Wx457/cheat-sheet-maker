@@ -8,12 +8,6 @@ load_dotenv()
 class Settings:
     """应用配置类，从环境变量读取配置"""
 
-    # TODO: DEPRECATED (Phase 1/3) — MongoDB config; remove after auth moves to Clerk (Phase 2)
-    # and project persistence moves to Supabase (Phase 3).
-    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
-    DB_NAME: str = os.getenv("DB_NAME", "cheat_sheet_db")
-    COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "knowledge_base")
-
     # Google API 配置
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
 
@@ -27,6 +21,10 @@ class Settings:
     # Qdrant vector store
     QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
     QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
+
+    # Supabase Database
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_SECRET_KEY: str = os.getenv("SUPABASE_SECRET_KEY", "")
 
     # Cohere Rerank
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
@@ -66,23 +64,6 @@ class Settings:
     PDF_GENERATION_HOST: str = os.getenv(
         "PDF_GENERATION_HOST", "http://localhost:8000"
     )  # Worker 进程访问 FastAPI 服务器的地址
-
-    # JWT 认证配置
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
-    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))  # 默认 7 天
-
-    @classmethod
-    def validate(cls) -> None:
-        # TODO: DEPRECATED — MONGODB_URI and JWT_SECRET_KEY checks; this method is never
-        # called. Remove after Phase 2 (Clerk) and Phase 3 (Supabase) migrations.
-        """验证必需的配置项"""
-        if not cls.MONGODB_URI:
-            raise ValueError("MONGODB_URI 未在环境变量中设置")
-        if not cls.GOOGLE_API_KEY:
-            raise ValueError("GOOGLE_API_KEY 未在环境变量中设置")
-        if not cls.JWT_SECRET_KEY:
-            raise ValueError("JWT_SECRET_KEY 未在环境变量中设置")
 
 
 # 创建全局配置实例

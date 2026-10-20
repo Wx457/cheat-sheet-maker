@@ -122,8 +122,14 @@ class GeminiClient:
             generation_config={"response_mime_type": "text/plain"},
         )
         for chunk in stream:
-            if hasattr(chunk, "text") and chunk.text:
-                yield chunk.text
+            # 流末尾常有只带 finish_reason、没有 Part 的 chunk；此时 .text 会抛 ValueError
+            # （hasattr 只吞 AttributeError，拦不住），直接跳过，避免整个流在结尾崩掉。
+            try:
+                text = chunk.text
+            except ValueError:
+                continue
+            if text:
+                yield text
 
     def generate_json(self, prompt: str) -> dict:
         response_text = self.generate_text(prompt)

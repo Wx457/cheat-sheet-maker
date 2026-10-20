@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """LLM-as-a-Judge evaluation for RAG retrieval groundedness.
 
-This script runs against the **live** MongoDB Atlas vector store and uses
+This script runs against the **live** Qdrant vector store and uses
 Gemini 2.5 Flash as an impartial judge to score how well retrieved chunks
 cover the expected knowledge anchors for each synthetic query.
 
-Usage (from backend/):
-    python -m scripts.eval_retrieval_groundedness                  # all queries
-    python -m scripts.eval_retrieval_groundedness --user-id <uid>  # specific user
+Usage (from backend/, e.g. inside the cheat-backend container):
+    python -m scripts.eval_retrieval_groundedness --user-id <uid>
 
-Requires: MONGODB_URI, GOOGLE_API_KEY, OPENAI_API_KEY in .env
+Requires: QDRANT_HOST / QDRANT_PORT, GOOGLE_API_KEY, OPENAI_API_KEY in .env
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.infrastructure.rag.vector_store import VectorStore  # noqa: E402
+from app.infrastructure.rag.qdrant_store import QdrantVectorStore  # noqa: E402
 from app.infrastructure.llm.gemini_client import GeminiClient  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
@@ -131,7 +130,7 @@ JUDGE_PROMPT_TEMPLATE = textwrap.dedent("""\
 # ---------------------------------------------------------------------------
 
 async def retrieve_chunks(
-    vs: VectorStore, query: str, user_id: str, k: int = 5,
+    vs: QdrantVectorStore, query: str, user_id: str, k: int = 5,
 ) -> list[dict]:
     return await vs.search_context(query, user_id=user_id, k=k)
 
@@ -169,7 +168,7 @@ async def run_evaluation(
     dataset: list[GoldenQuery] | None = None,
 ) -> list[EvalRow]:
     dataset = dataset or GOLDEN_DATASET
-    vs = VectorStore()
+    vs = QdrantVectorStore()
     gemini = GeminiClient()
     rows: list[EvalRow] = []
 

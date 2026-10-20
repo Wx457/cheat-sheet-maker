@@ -12,23 +12,32 @@
  *   Webapp（本页）
  *     → ① 读取 URL 参数
  *     → ② 将 token 存入 sessionStorage（6-3：auth token 过渡方案）
- *     → ③ 自动触发 POST /api/generate/stream（SSE）
- *     → ④ 用户拖拽 / 编辑 / 导出 PDF
- *     → ⑤ 刷新时若正在生成：beforeunload 警告（6-4）
+ *     → ③ URL 无 sheetId：自动触发 POST /api/generate/stream（SSE）
+ *        URL 有 sheetId：GET /api/cheat-sheets/{id} 恢复，不重新生成（3-4-c）
+ *     → ④ 生成完成后自动保存（POST），把 sheetId 写回 URL（replaceState，不重新渲染路由）
+ *     → ⑤ 用户拖拽 / 编辑 → 防抖 PUT；导出 PDF
+ *     → ⑥ 生成中 / 有未保存修改时刷新：beforeunload 警告（6-4）
  *
  * 页面状态机：
  *   idle → connecting → streaming → complete
- *            (SSE)                     |
+ *     │       (SSE)                     ↑
+ *     └──→ loading（按 sheetId 恢复）───┘
  *                                   error（任意阶段可跳入）
  *
  * ⚠️  useSearchParams() 必须在 <Suspense> 内使用（Next.js App Router 要求）
  */
 
-import { Suspense, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Suspense, useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useCheatSheetStore } from '@/stores/cheatSheetStore'
 import { startStreaming } from '@/lib/streaming'
-import { storeAuthToken } from '@/lib/api'
+import {
+  ApiError,
+  createCheatSheet,
+  loadCheatSheet,
+  storeAuthToken,
+  updateCheatSheet,
+} from '@/lib/api'
 import CardList from '@/components/CardList'
 import StreamingStatus from '@/components/StreamingStatus'
 import type {
@@ -38,7 +47,50 @@ import type {
   CourseArchetype,
   ExamType,
   TopicInput,
+  UISection,
+  CheatSheetSaveRequest,
 } from '@/types'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 持久化工具（3-4-c）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 编辑停止多久后自动保存 */
+const AUTOSAVE_DELAY_MS = 1000
+
+/** 去掉前端运行时字段（id / isStreaming） */
+function toSaveRequest(title: string, sections: UISection[]): CheatSheetSaveRequest {
+  return { title, sections: sections.map(({ title, items }) => ({ title, items })) }
+}
+
+/**
+ * 只改 URL 中的 sheetId，保留插件传入的其他参数。
+ * 用原生 replaceState：与 useSearchParams 同步，但不触发路由导航 / 页面重渲染。
+ */
+function replaceSheetIdInUrl(id: string | null) {
+  const params = new URLSearchParams(window.location.search)
+  if (id) params.set('sheetId', id)
+  else params.delete('sheetId')
+  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+}
+
+function SaveIndicator({ saving, saveError, isDirty, everSaved }: {
+  saving: boolean
+  saveError: string | null
+  isDirty: boolean
+  everSaved: boolean
+}) {
+  if (saveError) {
+    return <span className="text-xs text-red-500 shrink-0" title={saveError}>Not saved</span>
+  }
+  if (saving || isDirty) {
+    return <span className="text-xs text-zinc-400 shrink-0">Saving…</span>
+  }
+  if (everSaved) {
+    return <span className="text-xs text-zinc-400 shrink-0">Saved</span>
+  }
+  return null
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Icons
@@ -217,6 +269,7 @@ function EditorContent() {
   }, [topicsParam])
 
   const hasPluginParams = !!searchParams.get('userId')
+  const sheetIdParam    = searchParams.get('sheetId')   // 3-4-c：已保存的小抄 id
 
   // ── Zustand store ──────────────────────────────────────────────────────────
   const status              = useCheatSheetStore((s) => s.status)
@@ -228,14 +281,35 @@ function EditorContent() {
   const setError            = useCheatSheetStore((s) => s.setError)
   const setMetaTitle        = useCheatSheetStore((s) => s.setMetaTitle)
   const mergeOrAddSection   = useCheatSheetStore((s) => s.mergeOrAddSection)
+  const setSheetId          = useCheatSheetStore((s) => s.setSheetId)
+  const loadSheet           = useCheatSheetStore((s) => s.loadSheet)
+  const savedSnapshot       = useCheatSheetStore((s) => s.savedSnapshot)
+  const markSaved           = useCheatSheetStore((s) => s.markSaved)
+
+  // ── 持久化状态（3-4-c） ────────────────────────────────────────────────────
+  const [saving, setSaving]               = useState(false)
+  const [saveError, setSaveError]         = useState<string | null>(null)
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const abortRef   = useRef<AbortController | null>(null)
   const startedRef = useRef(false)   // 防止 StrictMode / URL 变化重复触发
+  // 保存请求串行执行：避免并发 POST 建出两份小抄、或旧 PUT 覆盖新 PUT
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
+  // 每次重新生成 +1：丢弃上一份小抄仍在路上的保存结果
+  const epochRef = useRef(0)
+  // 恢复失败原因：not_found 时 Retry 改为重新生成，其余错误 Retry 重新加载
+  const loadFailureRef = useRef<'not_found' | 'other' | null>(null)
 
   // ── 派生状态 ───────────────────────────────────────────────────────────────
   const isGenerating = status === 'connecting' || status === 'streaming'
   const canExport    = sections.length > 0
+  // 生成完成后，内容与最近一次成功保存不同 → 需要保存（首次保存前 savedSnapshot 为 null）
+  const isDirty =
+    status === 'complete' &&
+    sections.length > 0 &&
+    (savedSnapshot === null ||
+      savedSnapshot.sections !== sections ||
+      savedSnapshot.title !== metaTitle)
 
   // ── 6-3：token 存入 sessionStorage ─────────────────────────────────────────
   useEffect(() => {
@@ -275,6 +349,64 @@ function EditorContent() {
     setStatus, setError, setMetaTitle, mergeOrAddSection,
   ])
 
+  // ── 3-4-c：按 sheetId 恢复（刷新页面时不重新生成） ─────────────────────────
+  const runLoad = useCallback(async (id: string) => {
+    const controller = new AbortController()
+    abortRef.current = controller
+    loadFailureRef.current = null
+    setStatus('loading')
+    try {
+      loadSheet(await loadCheatSheet(id, userId, controller.signal))
+    } catch (err) {
+      if (controller.signal.aborted) return
+      // 404：不存在或不属于该用户；422：sheetId 不是合法 UUID
+      const notFound = err instanceof ApiError && (err.status === 404 || err.status === 422)
+      loadFailureRef.current = notFound ? 'not_found' : 'other'
+      setError(
+        notFound
+          ? 'This saved cheat sheet was not found. Click Retry to generate a new one.'
+          : `Could not load the saved cheat sheet: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }, [userId, setStatus, setError, loadSheet])
+
+  // ── 3-4-c：保存（首次 POST 并把 id 写回 URL，之后 PUT） ─────────────────────
+  const persist = useCallback(() => {
+    const epoch = epochRef.current
+    saveChainRef.current = saveChainRef.current.then(async () => {
+      if (epoch !== epochRef.current) return
+      // 执行时再读 store：拿到最新内容和（可能刚由上一个 POST 写入的）sheetId
+      const { metaTitle: title, sections: current, sheetId } = useCheatSheetStore.getState()
+      const body = toSaveRequest(title, current)
+      setSaving(true)
+      try {
+        const record = sheetId
+          ? await updateCheatSheet(sheetId, body, userId)
+          : await createCheatSheet(body, userId)
+        if (epoch !== epochRef.current) return
+        if (!sheetId) {
+          setSheetId(record.id)
+          replaceSheetIdInUrl(record.id)
+        }
+        markSaved({ title, sections: current })
+        setSaveError(null)
+      } catch (err) {
+        if (epoch === epochRef.current) {
+          setSaveError(err instanceof Error ? err.message : String(err))
+        }
+      } finally {
+        setSaving(false)
+      }
+    })
+  }, [userId, setSheetId, markSaved])
+
+  // 内容变化后防抖保存（生成完成时 isDirty 变为 true，也由此触发首次保存）
+  useEffect(() => {
+    if (!isDirty) return
+    const timer = setTimeout(persist, AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [isDirty, sections, metaTitle, persist])
+
   // ── 自动触发（有插件参数时） ────────────────────────────────────────────────
   useEffect(() => {
     if (!hasPluginParams) return
@@ -283,7 +415,8 @@ function EditorContent() {
 
     startedRef.current = true
     reset()
-    runStreaming()
+    if (sheetIdParam) runLoad(sheetIdParam)
+    else runStreaming()
 
     return () => {
       abortRef.current?.abort()
@@ -297,15 +430,26 @@ function EditorContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPluginParams])
 
-  // ── 6-4：刷新警告（生成中时拦截） ────────────────────────────────────────────
+  // ── 6-4：刷新警告（生成中，或有尚未保存的修改时拦截） ─────────────────────────
+  const warnOnUnload = isGenerating || isDirty || saving
   useEffect(() => {
-    if (!isGenerating) return
+    if (!warnOnUnload) return
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [isGenerating])
+  }, [warnOnUnload])
 
   // ── 操作处理 ───────────────────────────────────────────────────────────────
+  /** 开始新一轮生成：丢弃旧小抄的保存状态，并从 URL 去掉旧 sheetId */
+  const startFreshGeneration = () => {
+    epochRef.current += 1
+    loadFailureRef.current = null
+    setSaveError(null)
+    reset()   // 同时清空 sheetId / savedSnapshot
+    replaceSheetIdInUrl(null)
+    runStreaming()
+  }
+
   const handleCancel = () => {
     abortRef.current?.abort()
     startedRef.current = false   // 允许重新触发（如果用户重新打开相同 URL）
@@ -313,10 +457,13 @@ function EditorContent() {
   }
 
   const handleRetry = () => {
-    startedRef.current = false
-    reset()
-    runStreaming()
     startedRef.current = true
+    // 恢复失败（网络 / 服务端错误）→ 重新加载；其余情况（含 404）→ 重新生成
+    if (sheetIdParam && loadFailureRef.current === 'other') {
+      runLoad(sheetIdParam)
+      return
+    }
+    startFreshGeneration()
   }
 
   const handleExportPDF = () => window.print()
@@ -342,6 +489,15 @@ function EditorContent() {
           </span>
 
           <StreamingStatus />
+
+          {status === 'complete' && (
+            <SaveIndicator
+              saving={saving}
+              saveError={saveError}
+              isDirty={isDirty}
+              everSaved={savedSnapshot !== null}
+            />
+          )}
 
           {/* Cancel：生成中可见 */}
           {isGenerating && (

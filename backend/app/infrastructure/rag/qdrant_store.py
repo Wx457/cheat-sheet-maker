@@ -1,4 +1,4 @@
-"""Qdrant-backed vector store — drop-in replacement for MongoDB VectorStore (Phase 1)."""
+"""Qdrant-backed vector store: chunk ingest, per-user retrieval and quota (Phase 1)."""
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +18,7 @@ from qdrant_client.models import (
     FilterSelector,
     MatchValue,
     PointStruct,
+    ScoredPoint,
     VectorParams,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -44,7 +45,7 @@ _VECTOR_SIZE = 1536  # text-embedding-3-small output dimension
 
 
 class QdrantVectorStore:
-    """Infra: Qdrant vector store — replaces MongoVectorStore in Phase 1."""
+    """Infra: Qdrant vector store（chunk 按 payload metadata.user_id 隔离）。"""
 
     def __init__(self) -> None:
         self.client = QdrantClient(
@@ -191,17 +192,30 @@ class QdrantVectorStore:
     def _embed_query(self, query: str) -> List[float]:
         return self.embeddings.get_embeddings([query])[0]
 
+    def _vector_search(
+        self,
+        qvec: List[float],
+        query_filter: Filter,
+        limit: int,
+        with_payload: bool = True,
+        with_vectors: bool = False,
+    ) -> List[ScoredPoint]:
+        # client.search 在 qdrant-client 1.16+ 已移除，统一走 query_points
+        return self.client.query_points(
+            collection_name=_COLLECTION,
+            query=qvec,
+            query_filter=query_filter,
+            limit=limit,
+            with_payload=with_payload,
+            with_vectors=with_vectors,
+        ).points
+
     async def search_context(
         self, query: str, user_id: str, k: int = 5
     ) -> List[dict]:
         qvec = await asyncio.to_thread(self._embed_query, query)
         hits = await asyncio.to_thread(
-            self.client.search,
-            collection_name=_COLLECTION,
-            query_vector=qvec,
-            query_filter=self._user_filter(user_id),
-            limit=k,
-            with_payload=True,
+            self._vector_search, qvec, self._user_filter(user_id), k
         )
         return [
             {
@@ -218,13 +232,7 @@ class QdrantVectorStore:
         """Fetch fetch_k candidates then select k diverse results via greedy MMR."""
         qvec = await asyncio.to_thread(self._embed_query, query)
         candidates = await asyncio.to_thread(
-            self.client.search,
-            collection_name=_COLLECTION,
-            query_vector=qvec,
-            query_filter=self._user_filter(user_id),
-            limit=fetch_k,
-            with_payload=True,
-            with_vectors=True,
+            self._vector_search, qvec, self._user_filter(user_id), fetch_k, with_vectors=True
         )
         if not candidates:
             return []
@@ -272,11 +280,10 @@ class QdrantVectorStore:
     ) -> bool:
         qvec = await asyncio.to_thread(self._embed_query, query)
         hits = await asyncio.to_thread(
-            self.client.search,
-            collection_name=_COLLECTION,
-            query_vector=qvec,
-            query_filter=self._batch_filter(user_id, ingest_batch_id),
-            limit=1,
+            self._vector_search,
+            qvec,
+            self._batch_filter(user_id, ingest_batch_id),
+            1,
             with_payload=False,
         )
         return len(hits) > 0

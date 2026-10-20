@@ -129,6 +129,10 @@ export async function startStreaming(
         }
       }
     }
+
+    // 收到 [DONE] 会提前 return；走到这里说明后端在完成前断开了连接
+    // （例如生成中途抛异常），否则页面会一直停在 "Generating…" 且无任何提示
+    onError(new Error('Stream ended before completion — the server may have hit an error. Please retry.'))
   } catch (err) {
     // 处理 AbortError（用户主动取消）和其他网络错误
     if (err instanceof Error && err.name === 'AbortError') {

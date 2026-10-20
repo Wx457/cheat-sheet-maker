@@ -1,4 +1,3 @@
-import asyncio
 import traceback
 from datetime import datetime
 
@@ -191,14 +190,12 @@ async def delete_user_chunks(
     """
     删除当前用户的知识库向量数据（用户级操作）。
 
-    仅删除 X-User-ID 对应的 chunks，不影响其他用户数据。
+    仅删除 X-User-ID 对应的 chunks（及其 Supabase ingest 批次记录），不影响其他用户数据。
     供 Chrome 插件的 "Clear KB" 按钮调用。
     """
     try:
         ingestion = IngestionService.default()
-        deleted_count = await asyncio.to_thread(
-            ingestion.rag_service.delete_user_data, x_user_id
-        )
+        deleted_count = await ingestion.delete_user_data(x_user_id)
         return ClearResponse(status="success", deleted_count=int(deleted_count))
     except Exception as e:
         traceback.print_exc()

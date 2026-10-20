@@ -15,6 +15,13 @@ const STATUS_CONFIG: Record<
     color: 'text-zinc-400',
     icon: <span className="inline-block w-2 h-2 rounded-full bg-zinc-400" />,
   },
+  loading: {
+    label: 'Loading…',
+    color: 'text-zinc-500',
+    icon: (
+      <span className="inline-block w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
+    ),
+  },
   connecting: {
     label: 'Connecting…',
     color: 'text-yellow-500',

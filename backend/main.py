@@ -1,32 +1,18 @@
-from contextlib import asynccontextmanager
+import asyncio
 from pathlib import Path
-from typing import Final
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pymongo import MongoClient
+from qdrant_client import QdrantClient
 
 from app.api import generate_router
-from app.api.auth import router as auth_router
 from app.api.rag import router as rag_router
-from app.api.plugin import router as plugin_router
+from app.api.cheat_sheets import router as cheat_sheets_router
 from app.core.config import settings
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    # TODO: DEPRECATED — TTL indexes were for the MongoDB knowledge_base and projects
-    # collections. knowledge_base → Qdrant; projects → Supabase (Phase 3). Remove this call.
-    # setup_mongodb_ttl_indexes()
-    setup_users_indexes()  # still needed until Clerk replaces bcrypt/PyJWT (Phase 2)
-
-    yield
-
-
-app = FastAPI(title="Cheat Sheet Maker API", lifespan=lifespan)
+app = FastAPI(title="Cheat Sheet Maker API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,74 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)
 app.include_router(generate_router)
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
-app.include_router(plugin_router, tags=["Plugin"])
-
-
-# TTL 过期时间（秒）
-PROJECTS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 7  # 7 天
-VECTORS_TTL_SECONDS: Final[int] = 60 * 60 * 24 * 3  # 3 天
-
-
-# TODO: DEPRECATED — remove after Phase 3 (Supabase). knowledge_base is now Qdrant;
-# projects persistence will move to Supabase.
-def setup_mongodb_ttl_indexes() -> None:
-    """
-    在启动时为 MongoDB 创建 TTL 索引。
-    MongoDB 会自动去重创建，重复调用安全。
-    """
-    client = None
-    try:
-        client = MongoClient(settings.MONGODB_URI)
-        db = client[settings.DB_NAME]
-
-        # projects 集合：根据 created_at 7 天过期
-        projects = db["projects"]
-        projects.create_index("created_at", expireAfterSeconds=PROJECTS_TTL_SECONDS)
-
-        # 向量集合：metadata.created_at 3 天过期
-        vectors = db[settings.COLLECTION_NAME]
-        vectors.create_index(
-            "metadata.created_at",
-            expireAfterSeconds=VECTORS_TTL_SECONDS,
-        )
-
-        print("✅ MongoDB TTL indexes checked/created")
-    except Exception as exc:
-        # 记录错误，但不阻止应用启动
-        print(f"⚠️ Error creating MongoDB TTL indexes: {exc}")
-    finally:
-        try:
-            if client:
-                client.close()
-        except Exception:
-            pass
-
-
-# TODO: DEPRECATED — remove after Phase 2 (Clerk). Users table moves to Clerk/Supabase.
-def setup_users_indexes() -> None:
-    """
-    为 users 集合创建唯一索引（email 唯一、user_id 唯一）。
-    MongoDB 会自动去重，重复调用安全。
-    """
-    client = None
-    try:
-        client = MongoClient(settings.MONGODB_URI)
-        db = client[settings.DB_NAME]
-        users = db["users"]
-        users.create_index("email", unique=True)
-        users.create_index("user_id", unique=True)
-        print("✅ MongoDB users indexes checked/created")
-    except Exception as exc:
-        print(f"⚠️ Error creating users indexes: {exc}")
-    finally:
-        try:
-            if client:
-                client.close()
-        except Exception:
-            pass
+app.include_router(cheat_sheets_router, tags=["CheatSheets"])
 
 
 # 挂载静态文件（前端构建产物）
@@ -138,22 +59,22 @@ async def health() -> dict:
     checks: dict[str, str] = {"api": "ok"}
     degraded = False
 
-    # TODO: DEPRECATED — MongoDB health check; remove after Phase 2/3 (Clerk + Supabase).
-    # Keep until auth.py and plugin.py finish migrating away from MongoDB.
-    mongo_client = None
+    # Qdrant 是生成链路的必需依赖（RAG 检索）。
+    # Supabase 不在此检查：它是外部托管服务，挂掉只影响保存，且每 20s 的 healthcheck
+    # 都去请求它没有必要。
+    def _ping_qdrant() -> None:
+        client = QdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT, timeout=2)
+        try:
+            client.get_collections()
+        finally:
+            client.close()
+
     try:
-        mongo_client = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=2000)
-        mongo_client.admin.command("ping")
-        checks["mongodb"] = "ok"
+        await asyncio.to_thread(_ping_qdrant)
+        checks["qdrant"] = "ok"
     except Exception as exc:
         degraded = True
-        checks["mongodb"] = f"error: {exc}"
-    finally:
-        try:
-            if mongo_client:
-                mongo_client.close()
-        except Exception:
-            pass
+        checks["qdrant"] = f"error: {exc}"
 
     if degraded:
         raise HTTPException(

@@ -91,6 +91,23 @@ export interface UISection extends Section {
   isStreaming: boolean
 }
 
+// ── 小抄持久化（/api/cheat-sheets，Supabase） ─────────────────────────────
+
+/** POST / PUT 请求体：只含 {title, items}，不含前端 id / isStreaming */
+export interface CheatSheetSaveRequest {
+  title: string
+  sections: Section[]
+}
+
+/** 后端 CheatSheetRecord */
+export interface CheatSheetRecord {
+  id: string
+  title: string
+  sections: Section[]
+  created_at: string
+  updated_at: string
+}
+
 // ── Outline ────────────────────────────────────────────────────────────────
 
 export interface OutlineTaskResult {

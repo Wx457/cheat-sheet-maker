@@ -6,6 +6,8 @@
  */
 
 import type {
+  CheatSheetRecord,
+  CheatSheetSaveRequest,
   GenerateOutlineRequest,
   OutlineTaskResult,
 } from '@/types'
@@ -41,6 +43,14 @@ export function clearAuthToken(): void {
 // 内部工具
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** 非 2xx 响应。保留 status，调用方可区分 404 等情况 */
+export class ApiError extends Error {
+  constructor(public readonly status: number, detail: string) {
+    super(`API ${status}: ${detail}`)
+    this.name = 'ApiError'
+  }
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit,
@@ -58,7 +68,7 @@ async function apiFetch<T>(
 
   if (!res.ok) {
     const detail = await res.text().catch(() => res.statusText)
-    throw new Error(`API ${res.status}: ${detail}`)
+    throw new ApiError(res.status, detail)
   }
 
   return res.json() as Promise<T>
@@ -110,6 +120,48 @@ export async function generateOutline(
     method: 'POST',
     headers: { 'X-User-ID': userId },
     body: JSON.stringify(payload),
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 小抄持久化（UPGRADE_PLAN 3-4-c；后端存 Supabase，按 X-User-ID 校验归属）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 生成完成后首次保存（POST /api/cheat-sheets），返回含 id 的记录 */
+export async function createCheatSheet(
+  body: CheatSheetSaveRequest,
+  userId: string,
+): Promise<CheatSheetRecord> {
+  return apiFetch<CheatSheetRecord>('/api/cheat-sheets', {
+    method: 'POST',
+    headers: { 'X-User-ID': userId },
+    body: JSON.stringify(body),
+  })
+}
+
+/** 编辑后覆盖保存（PUT /api/cheat-sheets/{id}） */
+export async function updateCheatSheet(
+  id: string,
+  body: CheatSheetSaveRequest,
+  userId: string,
+): Promise<CheatSheetRecord> {
+  return apiFetch<CheatSheetRecord>(`/api/cheat-sheets/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'X-User-ID': userId },
+    body: JSON.stringify(body),
+  })
+}
+
+/** 刷新页面时恢复（GET /api/cheat-sheets/{id}）。不存在或不属于该用户 → ApiError 404 */
+export async function loadCheatSheet(
+  id: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<CheatSheetRecord> {
+  return apiFetch<CheatSheetRecord>(`/api/cheat-sheets/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: { 'X-User-ID': userId },
+    signal,
   })
 }
 

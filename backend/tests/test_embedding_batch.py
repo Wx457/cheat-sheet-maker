@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
 
 from app.infrastructure.llm.openai_client import OpenAIClient

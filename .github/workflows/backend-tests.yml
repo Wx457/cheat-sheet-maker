@@ -60,7 +60,6 @@ jobs:
         env:
           GOOGLE_API_KEY: "ci-placeholder"
           OPENAI_API_KEY: "ci-placeholder"
-          MONGODB_URI: "mongodb://localhost:27017"
         run: python -c "from app.domain.utils.cleaner import clean_raw_text; from app.infrastructure.llm.retry_utils import run_with_exponential_backoff; from app.infrastructure.llm.openai_client import OpenAIClient; from app.infrastructure.llm.gemini_client import GeminiClient; print('smoke-import-ok')"
 
       - name: Run pytest

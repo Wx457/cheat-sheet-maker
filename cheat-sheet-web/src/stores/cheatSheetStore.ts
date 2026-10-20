@@ -1,14 +1,20 @@
 'use client'
 
 import { create } from 'zustand'
-import type { UISection, ContentItem } from '@/types'
+import type { UISection, ContentItem, CheatSheetRecord } from '@/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State shape
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface SavedSnapshot {
+  title: string
+  sections: UISection[]
+}
+
 export type StreamStatus =
   | 'idle'
+  | 'loading'        // 刷新后按 sheetId 从后端恢复中（3-4-c）
   | 'connecting'     // SSE 连接中
   | 'streaming'      // 卡片流式渲染中
   | 'complete'
@@ -18,10 +24,22 @@ interface CheatSheetState {
   // ── 小抄数据 ────────────────────────────────────────────────────────────
   metaTitle: string           // 后端推送的 {"_type":"meta","title":"..."} 标题
   sections: UISection[]       // 所有 section（含前端 id 和 isStreaming 标志）
+  sheetId: string | null      // 已保存到后端的小抄 id（首次保存前为 null）
+  /**
+   * 最近一次成功保存（或从后端恢复）的内容，首次保存前为 null。
+   * 与当前 metaTitle / sections 做引用比较判断是否有未保存修改（每次编辑都会生成新数组）。
+   */
+  savedSnapshot: SavedSnapshot | null
 
   // ── 流式状态 ────────────────────────────────────────────────────────────
   status: StreamStatus
   error: string | null
+
+  // ── 持久化 actions（由 editor page 调用） ───────────────────────────────
+  setSheetId: (id: string | null) => void
+  markSaved: (snapshot: SavedSnapshot) => void
+  /** 用后端记录填充 store（刷新恢复），status → complete，并以此为已保存基线 */
+  loadSheet: (record: CheatSheetRecord) => void
 
   // ── 流式写入 actions（由 streaming.ts 调用） ────────────────────────────
   setStatus: (status: StreamStatus) => void
@@ -66,8 +84,33 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   // ── 初始状态 ──────────────────────────────────────────────────────────────
   metaTitle: '',
   sections: [],
+  sheetId: null,
+  savedSnapshot: null,
   status: 'idle',
   error: null,
+
+  // ── 持久化 ────────────────────────────────────────────────────────────────
+  setSheetId: (sheetId) => set({ sheetId }),
+
+  markSaved: (savedSnapshot) => set({ savedSnapshot }),
+
+  loadSheet: (record) => {
+    const sections: UISection[] = record.sections.map((s) => ({
+      title: s.title,
+      items: s.items,
+      id: nextId(),
+      isStreaming: false,
+    }))
+    set({
+      sheetId: record.id,
+      metaTitle: record.title,
+      sections,
+      // 恢复的内容即已保存内容，避免恢复后立刻触发一次无意义的 PUT
+      savedSnapshot: { title: record.title, sections },
+      status: 'complete',
+      error: null,
+    })
+  },
 
   // ── 流式写入 ──────────────────────────────────────────────────────────────
   setStatus: (status) => set({ status }),
@@ -124,6 +167,8 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
     set({
       metaTitle: '',
       sections: [],
+      sheetId: null,
+      savedSnapshot: null,
       status: 'idle',
       error: null,
     }),

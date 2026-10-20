@@ -18,7 +18,12 @@ from app.schemas import (
     OutlineResponse,
     TopicInput,
 )
-from app.domain.utils.cleaner import clean_raw_text, repair_json_string
+from app.domain.utils.cleaner import (
+    clean_raw_text,
+    escape_latex_backslashes,
+    extract_json_objects,
+    repair_json_string,
+)
 from app.infrastructure.rag.qdrant_store import QdrantVectorStore, get_qdrant_store
 
 logger = logging.getLogger(__name__)
@@ -231,7 +236,8 @@ class CheatSheetService:
         Yields SSE 格式字符串（已含 "data: ...\n\n" 前缀）。
 
         """
-        import asyncio, json as _json
+        import asyncio
+        import json as _json
 
         # 1) budget
         if not request_data.selected_topics:
@@ -349,16 +355,14 @@ class CheatSheetService:
         # 不 await：队列创建后立即进入消费循环
         producer = loop.run_in_executor(None, _produce)
 
-        # 从同步队列取 chunk，解析 NDJSON
-        # Gemini 实际输出的是「扁平格式」：section header 和每条 item 各占一行。
-        # 例：
-        #   {"title": "EM Algorithm"}
-        #   {"type": "text", "content": "..."}
-        #   {"type": "equation", "content": "..."}
-        #   {"title": "GMM"}
-        #   ...
-        # 解析器需将每个 section 的 items 归并后再一次性 yield，
-        # 同时兼容「正确格式」（title + items 同行）。
+        # 从队列取 chunk，在缓冲区里按花括号配平切出完整的顶层 JSON 对象（不按换行切分）。
+        # prompt 要求 NDJSON（每行一个完整 section），但 Gemini 实际输出并不稳定，观察到过：
+        #   - 单行 NDJSON；多行缩进的对象；多个对象首尾相连；```json 围栏（结尾 ``` 可能粘在对象后）
+        #   - 「扁平格式」：section header 和每条 item 各自是一个对象
+        #       {"title": "EM Algorithm"}
+        #       {"type": "text", "content": "..."}
+        #   - LaTeX 单反斜杠（\(、\theta）
+        # 解析器需将扁平格式的 items 归并到所属 section 后再 yield，同时兼容完整格式。
         current_section: dict | None = None
 
         def _try_yield_current():
@@ -367,26 +371,38 @@ class CheatSheetService:
                 return f"data: {_json.dumps(current_section)}\n\n"
             return None
 
-        def _process_line(raw_line: str):
+        def _drain_buffer():
+            """切出缓冲区中所有已完整的对象并处理，返回需要立即 yield 的 SSE 字符串列表。"""
+            nonlocal buffer
+            texts, buffer = extract_json_objects(buffer)
+            to_yield = []
+            for text in texts:
+                try:
+                    # 先修复 LaTeX 单反斜杠：否则整个 section 解析失败被丢弃，或公式被吞成制表符/换行。
+                    # strict=False 容忍字符串内的原始换行。
+                    obj = _json.loads(escape_latex_backslashes(text), strict=False)
+                except _json.JSONDecodeError:
+                    logger.warning("Dropped unparseable JSON object from LLM: %.200s", text)
+                    continue
+                to_yield.extend(_handle_object(obj))
+            return to_yield
+
+        def _handle_object(obj: dict):
             """
-            解析一行 NDJSON，根据结构分类：
-              - meta 行   → 直接 yield
-              - section 行（有 title，无 type）→ 先 yield 前一个 section，开始新 section
-              - item 行（有 type + content）→ 追加到当前 section 的 items
-              - 完整格式（title + items 同行）→ 先 yield 前一个 section，再 yield 本行
-            返回值：需要立即 yield 的 SSE 字符串列表
+            根据结构分类：
+              - meta          → 直接 yield
+              - 完整格式（title + items）→ 先 yield 前一个 section，再 yield 本对象
+              - section header（有 title，无 type）→ 先 yield 前一个 section，开始新 section
+              - item（有 type + content）→ 追加到当前 section 的 items
+              - {"sections": [...]} 包裹对象（prompt 禁止但可能出现）→ 逐个处理
             """
             nonlocal current_section
             to_yield = []
-            raw_line = raw_line.strip()
-            if not raw_line:
-                return to_yield
-            try:
-                obj = _json.loads(raw_line)
-            except _json.JSONDecodeError:
-                return to_yield  # 不完整或无效行，忽略
 
-            if not isinstance(obj, dict):
+            if isinstance(obj.get("sections"), list):
+                for section in obj["sections"]:
+                    if isinstance(section, dict):
+                        to_yield.extend(_handle_object(section))
                 return to_yield
 
             # ── meta 行 ────────────────────────────────────────────────
@@ -428,19 +444,16 @@ class CheatSheetService:
                 if isinstance(chunk_text, Exception):
                     raise chunk_text
                 buffer += chunk_text
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    for sse in _process_line(line):
-                        yield sse
+                for sse in _drain_buffer():
+                    yield sse
         finally:
             # 正常结束 / 客户端断开（GeneratorExit）/ 异常，都让生产者线程尽快停止
             stop_event.set()
         await producer
 
-        # 处理最后一行（Gemini 有时无换行结尾）
         if buffer.strip():
-            for sse in _process_line(buffer.strip()):
-                yield sse
+            # 流结束时仍有未闭合的对象（输出被截断，如超出 max tokens）
+            logger.warning("LLM stream ended with an incomplete JSON object: %.200s", buffer)
 
         # 最后 flush 尚未 yield 的 section
         ev = _try_yield_current()

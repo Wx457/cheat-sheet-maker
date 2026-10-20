@@ -15,6 +15,8 @@ from .cheat_sheet import (
     PluginAnalyzeRequest,
     PluginGenerateRequest,
     GenerateFinalResponse,
+    CheatSheetSaveRequest,
+    CheatSheetRecord,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     "PluginAnalyzeRequest",
     "PluginGenerateRequest",
     "GenerateFinalResponse",
+    "CheatSheetSaveRequest",
+    "CheatSheetRecord",
 ]

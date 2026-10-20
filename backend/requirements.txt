@@ -8,7 +8,7 @@ python-multipart==0.0.21
 Jinja2==3.1.6  # 模板渲染
 
 # Database
-pymongo==4.15.5
+supabase==2.31.0  # Phase 3：用户 / 小抄历史 / ingest 记录（仅后端，secret key 访问）
 
 # Redis client（Phase 5 SSE 结果缓存将使用）
 redis==5.3.1
@@ -30,7 +30,7 @@ grpcio==1.76.0
 grpcio-status==1.71.2
 
 # Vector Store & RAG
-qdrant-client==1.14.3
+qdrant-client==1.19.1  # 与 qdrant server v1.19.x 匹配（docker-compose.yml 固定镜像版本），升级时两边同步
 cohere==5.15.0
 langchain==1.2.0
 langchain-core==1.2.5
@@ -46,11 +46,6 @@ boto3==1.35.0
 
 # BM25 keyword search (fallback retrieval)
 rank-bm25==0.2.2
-
-# Authentication
-bcrypt==5.0.0
-PyJWT==2.13.0
-email-validator==2.3.0
 
 # Utilities
 python-dotenv==1.2.1
