@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import sys
 import textwrap
@@ -36,6 +35,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Golden dataset — synthetic queries with expected anchor knowledge
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class GoldenQuery:
@@ -129,22 +129,32 @@ JUDGE_PROMPT_TEMPLATE = textwrap.dedent("""\
 # Core evaluation logic
 # ---------------------------------------------------------------------------
 
+
 async def retrieve_chunks(
-    vs: QdrantVectorStore, query: str, user_id: str, k: int = 5,
+    vs: QdrantVectorStore,
+    query: str,
+    user_id: str,
+    k: int = 5,
 ) -> list[dict]:
     return await vs.search_context(query, user_id=user_id, k=k)
 
 
 def judge_groundedness(
-    gemini: GeminiClient, query: str, anchor: str, chunks: list[dict],
+    gemini: GeminiClient,
+    query: str,
+    anchor: str,
+    chunks: list[dict],
 ) -> tuple[float, str]:
     """Ask Gemini to score how well chunks cover the anchor knowledge."""
-    chunks_text = "\n---\n".join(
-        f"[Source: {c.get('source', '?')}]  {c.get('content', '')}" for c in chunks
-    ) or "(no chunks retrieved)"
+    chunks_text = (
+        "\n---\n".join(f"[Source: {c.get('source', '?')}]  {c.get('content', '')}" for c in chunks)
+        or "(no chunks retrieved)"
+    )
 
     prompt = JUDGE_PROMPT_TEMPLATE.format(
-        query=query, anchor=anchor, chunks=chunks_text,
+        query=query,
+        anchor=anchor,
+        chunks=chunks_text,
     )
     result = gemini.generate_json(prompt)
     score = float(result.get("score", 0.0))
@@ -179,17 +189,22 @@ async def run_evaluation(
 
         score, reasoning = judge_groundedness(gemini, gq.query, gq.anchor_knowledge, chunks)
 
-        rows.append(EvalRow(
-            topic=gq.topic,
-            query=gq.query,
-            chunks_retrieved=len(chunks),
-            score=score,
-            reasoning=reasoning,
-            latency_ms=round(retrieval_ms, 1),
-        ))
+        rows.append(
+            EvalRow(
+                topic=gq.topic,
+                query=gq.query,
+                chunks_retrieved=len(chunks),
+                score=score,
+                reasoning=reasoning,
+                latency_ms=round(retrieval_ms, 1),
+            )
+        )
         logger.info(
             "  [%s]  score=%.2f  chunks=%d  latency=%.0fms",
-            gq.topic, score, len(chunks), retrieval_ms,
+            gq.topic,
+            score,
+            len(chunks),
+            retrieval_ms,
         )
 
     vs.close()
@@ -199,6 +214,7 @@ async def run_evaluation(
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
+
 
 def print_report(rows: list[EvalRow]) -> None:
     scores = np.array([r.score for r in rows])
@@ -217,12 +233,12 @@ def print_report(rows: list[EvalRow]) -> None:
         )
 
     print("-" * 72)
-    print(f"{'MEAN':<25} {scores.mean():>6.2f} "
-          f"{np.mean([r.chunks_retrieved for r in rows]):>7.1f} "
-          f"{latencies.mean():>8.0f}ms")
-    print(f"{'STD':<25} {scores.std():>6.2f} "
-          f"{'':>7} "
-          f"{latencies.std():>8.0f}ms")
+    print(
+        f"{'MEAN':<25} {scores.mean():>6.2f} "
+        f"{np.mean([r.chunks_retrieved for r in rows]):>7.1f} "
+        f"{latencies.mean():>8.0f}ms"
+    )
+    print(f"{'STD':<25} {scores.std():>6.2f} " f"{'':>7} " f"{latencies.std():>8.0f}ms")
     print(f"{'MIN':<25} {scores.min():>6.2f}")
     print(f"{'MAX':<25} {scores.max():>6.2f}")
     print("=" * 72)
@@ -240,16 +256,20 @@ def print_report(rows: list[EvalRow]) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate RAG retrieval groundedness using LLM-as-a-Judge",
     )
     parser.add_argument(
-        "--user-id", required=True,
+        "--user-id",
+        required=True,
         help="user_id whose knowledge base to query against",
     )
     parser.add_argument(
-        "--k", type=int, default=5,
+        "--k",
+        type=int,
+        default=5,
         help="number of chunks to retrieve per query (default: 5)",
     )
     args = parser.parse_args()

@@ -87,7 +87,10 @@ def test_create_accepts_item_type_outside_enum(monkeypatch):
     response = client.post(
         "/api/cheat-sheets",
         headers={"X-User-ID": "anon-1"},
-        json={"title": "", "sections": [{"title": "S", "items": [{"type": "example", "content": "x"}]}]},
+        json={
+            "title": "",
+            "sections": [{"title": "S", "items": [{"type": "example", "content": "x"}]}],
+        },
     )
 
     assert response.status_code == 201
@@ -102,8 +105,14 @@ def test_get_and_update_are_scoped_to_owner(monkeypatch):
         json={"title": "Mine", "sections": []},
     )
 
-    assert client.get(f"/api/cheat-sheets/{SHEET_ID}", headers={"X-User-ID": "anon-1"}).status_code == 200
-    assert client.get(f"/api/cheat-sheets/{SHEET_ID}", headers={"X-User-ID": "anon-2"}).status_code == 404
+    assert (
+        client.get(f"/api/cheat-sheets/{SHEET_ID}", headers={"X-User-ID": "anon-1"}).status_code
+        == 200
+    )
+    assert (
+        client.get(f"/api/cheat-sheets/{SHEET_ID}", headers={"X-User-ID": "anon-2"}).status_code
+        == 404
+    )
 
     other = client.put(
         f"/api/cheat-sheets/{SHEET_ID}",

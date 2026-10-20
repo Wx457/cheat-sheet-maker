@@ -8,6 +8,7 @@ the owning user_id; never expose a method that skips that filter.
 All methods are synchronous (supabase-py sync client); call them from async code
 via asyncio.to_thread.
 """
+
 from __future__ import annotations
 
 import logging

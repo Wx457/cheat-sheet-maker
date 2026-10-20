@@ -24,11 +24,7 @@ async def generate_outline(
     """
     # raw_text is now optional; fall back to user_context then a generic query
     # so the service always receives a non-empty RAG search string
-    query_text = (
-        payload.raw_text
-        or payload.user_context
-        or "key exam topics"
-    )
+    query_text = payload.raw_text or payload.user_context or "key exam topics"
     try:
         service = CheatSheetService.default()
         return await service.generate_outline(

@@ -1,4 +1,5 @@
 """Qdrant-backed vector store: chunk ingest, per-user retrieval and quota (Phase 1)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +41,7 @@ class IngestResult(TypedDict):
     truncated: bool
     original_chunks_count: int
 
+
 _COLLECTION = "cheat_sheet_chunks"
 _VECTOR_SIZE = 1536  # text-embedding-3-small output dimension
 
@@ -53,9 +55,7 @@ class QdrantVectorStore:
             port=settings.QDRANT_PORT,
         )
         self.embeddings = OpenAIClient()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500, chunk_overlap=50
-        )
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         self._ensure_collection()
 
     # ── internal helpers ──────────────────────────────────────────────────────
@@ -139,9 +139,7 @@ class QdrantVectorStore:
                     full_metadata.setdefault(k, v)
 
         texts_to_embed = [self._enrich_chunk(c, full_metadata) for c in chunks]
-        embeddings_list = await asyncio.to_thread(
-            self.embeddings.get_embeddings, texts_to_embed
-        )
+        embeddings_list = await asyncio.to_thread(self.embeddings.get_embeddings, texts_to_embed)
 
         points = [
             PointStruct(
@@ -176,9 +174,7 @@ class QdrantVectorStore:
     ) -> IngestResult:
         pdf_reader = PdfReader(io.BytesIO(file_content))
         raw_text = "".join(
-            page.extract_text() + "\n"
-            for page in pdf_reader.pages
-            if page.extract_text()
+            page.extract_text() + "\n" for page in pdf_reader.pages if page.extract_text()
         )
         pdf_meta: Dict[str, Any] = {"source": filename}
         if metadata:
@@ -210,13 +206,9 @@ class QdrantVectorStore:
             with_vectors=with_vectors,
         ).points
 
-    async def search_context(
-        self, query: str, user_id: str, k: int = 5
-    ) -> List[dict]:
+    async def search_context(self, query: str, user_id: str, k: int = 5) -> List[dict]:
         qvec = await asyncio.to_thread(self._embed_query, query)
-        hits = await asyncio.to_thread(
-            self._vector_search, qvec, self._user_filter(user_id), k
-        )
+        hits = await asyncio.to_thread(self._vector_search, qvec, self._user_filter(user_id), k)
         return [
             {
                 "content": h.payload.get("page_content", ""),
@@ -275,9 +267,7 @@ class QdrantVectorStore:
             for i in selected
         ]
 
-    async def is_batch_searchable(
-        self, query: str, user_id: str, ingest_batch_id: str
-    ) -> bool:
+    async def is_batch_searchable(self, query: str, user_id: str, ingest_batch_id: str) -> bool:
         qvec = await asyncio.to_thread(self._embed_query, query)
         hits = await asyncio.to_thread(
             self._vector_search,
@@ -307,20 +297,17 @@ class QdrantVectorStore:
             return []
 
         contents = [r.payload.get("page_content", "") for r in records]
-        sources = [
-            (r.payload.get("metadata") or {}).get("source", "unknown") for r in records
-        ]
+        sources = [(r.payload.get("metadata") or {}).get("source", "unknown") for r in records]
 
         if query:
             tokenized = [c.lower().split() for c in contents]
             bm25 = BM25Okapi(tokenized)
             scores = bm25.get_scores(query.lower().split())
-            ranked = sorted(
-                zip(range(len(records)), scores), key=lambda x: x[1], reverse=True
-            )[:limit]
+            ranked = sorted(zip(range(len(records)), scores), key=lambda x: x[1], reverse=True)[
+                :limit
+            ]
             return [
-                {"content": contents[i], "source": sources[i], "score": float(s)}
-                for i, s in ranked
+                {"content": contents[i], "source": sources[i], "score": float(s)} for i, s in ranked
             ]
 
         return [

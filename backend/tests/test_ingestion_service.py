@@ -35,7 +35,9 @@ def test_process_text_records_ingest_batch():
 
     assert result == INGEST_RESULT
     db.get_or_create_user_id.assert_called_once_with("anon-1")
-    db.record_ingest_batch.assert_called_once_with("db-user-1", "batch-abc", "lecture.html", 12, False)
+    db.record_ingest_batch.assert_called_once_with(
+        "db-user-1", "batch-abc", "lecture.html", 12, False
+    )
 
 
 def test_process_file_records_filename_as_source():

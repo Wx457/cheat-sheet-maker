@@ -43,9 +43,7 @@ class Settings:
 
     # Embedding sub-batching (avoids rate-limit on large ingestions)
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "100"))
-    EMBEDDING_BATCH_DELAY_SECONDS: float = float(
-        os.getenv("EMBEDDING_BATCH_DELAY_SECONDS", "0.5")
-    )
+    EMBEDDING_BATCH_DELAY_SECONDS: float = float(os.getenv("EMBEDDING_BATCH_DELAY_SECONDS", "0.5"))
 
     # Ingestion quota
     MAX_CHUNKS_PER_USER: int = int(os.getenv("MAX_CHUNKS_PER_USER", "500"))

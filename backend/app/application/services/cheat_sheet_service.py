@@ -52,9 +52,7 @@ class CheatSheetService:
             rag_service=get_qdrant_store(),
         )
 
-    async def _rerank_chunks(
-        self, query: str, chunks: List[dict], top_n: int
-    ) -> List[dict]:
+    async def _rerank_chunks(self, query: str, chunks: List[dict], top_n: int) -> List[dict]:
         """Rerank candidates with Cohere; falls back to original order if unavailable."""
         if not chunks or len(chunks) <= top_n:
             return chunks
@@ -148,13 +146,9 @@ class CheatSheetService:
             max_attempts,
             user_id,
         )
-        fallback = await asyncio.to_thread(
-            self.rag_service.find_chunks_by_user, user_id, k, query
-        )
+        fallback = await asyncio.to_thread(self.rag_service.find_chunks_by_user, user_id, k, query)
         if fallback:
-            logger.info(
-                "BM25 fallback returned %d chunks for user_id=%s", len(fallback), user_id
-            )
+            logger.info("BM25 fallback returned %d chunks for user_id=%s", len(fallback), user_id)
         else:
             logger.warning("BM25 fallback also returned 0 chunks for user_id=%s", user_id)
         return fallback
