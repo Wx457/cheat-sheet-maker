@@ -4,28 +4,22 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import cohere as _cohere
-from pymongo import MongoClient
 
 from app.core.config import settings
 from app.domain.prompts.templates import CheatSheetPrompts
 from app.domain.rules.budget import BudgetRule
-from app.domain.utils.math_formatter import normalize_equation
 from app.infrastructure.llm.gemini_client import GeminiClient
 from app.schemas import (
-    CheatSheetSchema,
     ExamType,
     GenerateSheetRequest,
     OutlineResponse,
     TopicInput,
 )
-from app.domain.utils.cleaner import clean_raw_text, repair_json_string, densify_item_content
-from app.infrastructure.pdf.renderer import generate_pdf_via_browser
+from app.domain.utils.cleaner import clean_raw_text, repair_json_string
 from app.infrastructure.rag.qdrant_store import QdrantVectorStore, get_qdrant_store
-from app.infrastructure.storage.minio_client import MinIOClient, get_minio_client
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +39,12 @@ class CheatSheetService:
 
     gemini: GeminiClient
     rag_service: QdrantVectorStore
-    storage_client: MinIOClient
 
     @classmethod
     def default(cls) -> "CheatSheetService":
         return cls(
             gemini=GeminiClient(),
             rag_service=get_qdrant_store(),
-            storage_client=get_minio_client(),
         )
 
     async def _rerank_chunks(
@@ -220,192 +212,14 @@ class CheatSheetService:
             cleaned_text, combined_context if combined_context else None, exam_type
         )
 
-        response_text = self.gemini.generate_text(prompt)
+        # generate_text 是同步阻塞调用，放进线程避免卡住事件循环
+        response_text = await asyncio.to_thread(self.gemini.generate_text, prompt)
 
         repaired = repair_json_string(response_text)
         data = json.loads(repaired)
         if degraded_reason:
             data["degraded_reason"] = degraded_reason
         return OutlineResponse(**data)
-
-    @staticmethod
-    def _clean_equations(cheat_sheet_dict: Dict[str, Any]) -> None:
-        for section in cheat_sheet_dict.get("sections", []) or []:
-            for item in section.get("items", []) or []:
-                if item.get("type") == "equation":
-                    item["content"] = normalize_equation(item.get("content", ""))
-
-    @staticmethod
-    def _save_project_if_needed(
-        cheat_sheet: CheatSheetSchema, metadata: Optional[Dict[str, Any]]
-    ) -> Optional[str]:
-        if not metadata:
-            return None
-        client = MongoClient(settings.MONGODB_URI)
-        try:
-            db = client[settings.DB_NAME]
-            projects_collection = db["projects"]
-            project_data = {
-                "cheat_sheet": cheat_sheet.model_dump(),
-                "course_name": metadata.get("course_name"),
-                "syllabus": metadata.get("syllabus"),
-                "education_level": metadata.get("education_level"),
-                "exam_type": metadata.get("exam_type"),
-                "page_limit": metadata.get("page_limit"),
-                "selected_topics": metadata.get("selected_topics", []),
-                "created_at": datetime.utcnow(),
-            }
-            insert_result = projects_collection.insert_one(project_data)
-            return str(insert_result.inserted_id)
-        finally:
-            client.close()
-# TODO: 需要修改，支持流式生成
-    async def create_cheat_sheet_flow(
-        self,
-        request_data: GenerateSheetRequest,
-        user_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Master Workflow:
-        1) RAG 检索 2) 预算 3) Prompt 4) LLM 生成 5) 清洗 6) PDF 7) 上传 8) 入库
-        """
-        # 1) budget
-        if not request_data.selected_topics:
-            default_topics = [TopicInput(title="General Topics", relevance_score=1.0)]
-            budget_map = BudgetRule.calculate(request_data.page_limit.value, default_topics)
-            section_plan = "- General Topics (Target: ~{} items)".format(
-                budget_map["General Topics"]
-            )
-        else:
-            budget_map = BudgetRule.calculate(
-                request_data.page_limit.value, request_data.selected_topics
-            )
-            section_plan = "\n".join(
-                [
-                    f"- {t.title} (Target: ~{budget_map.get(t.title, 3)} items)"
-                    for t in request_data.selected_topics
-                ]
-            )
-
-        total_items = sum(budget_map.values())
-
-        # 2) RAG context
-        rag_context_str = ""
-
-        if request_data.selected_topics:
-            import asyncio
-
-            search_tasks = [
-                self.rag_service.search_context_mmr(topic.title, user_id=user_id, k=3, fetch_k=10)
-                for topic in request_data.selected_topics
-            ]
-            all_results = await asyncio.gather(*search_tasks)
-
-            seen = set()
-            for topic, results in zip(request_data.selected_topics, all_results):
-                if results:
-                    rag_context_str += f"\n--- Context for topic '{topic.title}' ---\n"
-                    for r in results:
-                        h = hash((r.get("content") or "").strip())
-                        if h in seen:
-                            continue
-                        seen.add(h)
-                        rag_context_str += f"Source: {r['source']}\n"
-                        rag_context_str += f"Content: {r['content']}\n"
-                        rag_context_str += "---------------------------------------\n"
-        else:
-            archetype = request_data.archetype.value if request_data.archetype else "general"
-            query = request_data.user_context or archetype or "general knowledge"
-
-            results = await self.rag_service.search_context(query, user_id=user_id, k=10)
-
-            if results:
-                rag_context_str += "\n--- General Knowledge Base Context ---\n"
-                for r in results:
-                    rag_context_str += f"Source: {r['source']}\n"
-                    rag_context_str += f"Content: {r['content']}\n"
-                    rag_context_str += "---------------------------------------\n"
-
-        # 3) prompt
-        exam_type_context = {
-            ExamType.quiz: "Quiz",
-            ExamType.midterm: "Midterm",
-            ExamType.final: "Final",
-        }.get(request_data.exam_type, "Final")
-        syllabus_instruction = ""
-        if request_data.syllabus:
-            cleaned_syllabus = clean_raw_text(request_data.syllabus)
-            syllabus_instruction = f"""
-            [Syllabus Filter Instruction]
-            User provided the following syllabus as content filtering guide:
-            {cleaned_syllabus}
-            [End of Syllabus Filter Instruction]
-            """
-        topics_str = (
-            "\n".join([f"- {t.title}" for t in request_data.selected_topics])
-            if request_data.selected_topics
-            else "未指定"
-        )
-        prompt = CheatSheetPrompts.render_cheatsheet_prompt(
-            exam_type_context=exam_type_context,
-            rag_context_str=rag_context_str,
-            syllabus_instruction=syllabus_instruction,
-            section_plan=section_plan,
-            total_items=total_items,
-            page_limit=request_data.page_limit.value,
-            academic_level=request_data.academic_level.value,
-            archetype=(request_data.archetype.value if request_data.archetype else "general"),
-            selected_topics_str=topics_str,
-        )
-
-        # 4) llm
-        response_text = self.gemini.generate_text(prompt, response_schema=CheatSheetSchema)
-        repaired = repair_json_string(response_text)
-        data = json.loads(repaired)
-
-        # 5) densify item content (BEFORE schema / PDF / MongoDB)
-        # - Replace internal newlines with spaces
-        # - Convert markdown list newlines to bullet points
-        # NOTE: Only process "text" type, NOT "equation" type (equations should preserve their format)
-        for section in data.get("sections", []) or []:
-            for item in section.get("items", []) or []:
-                if item.get("type") == "text":
-                    item["content"] = densify_item_content(item.get("content", ""))
-
-        # 6) normalize/clean
-        cheat_sheet = CheatSheetSchema(**data)
-        cheat_sheet_dict = cheat_sheet.model_dump()
-        self._clean_equations(cheat_sheet_dict)
-
-        # 7) pdf
-        pdf_bytes = await generate_pdf_via_browser(cheat_sheet_dict)
-
-        # 8) upload
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        safe_title = "".join(
-            c for c in cheat_sheet.title if c.isalnum() or c in (" ", "-", "_")
-        ).rstrip()
-        safe_title = safe_title.replace(" ", "_")[:50]
-        filename = f"{safe_title}_{timestamp}.pdf"
-        file_key = self.storage_client.upload_file(pdf_bytes, filename)
-        if not file_key:
-            raise ValueError("Failed to upload PDF to AWS S3")
-
-        # 9) save record
-        project_id = self._save_project_if_needed(cheat_sheet, metadata)
-
-        result: Dict[str, Any] = {
-            "status": "completed",
-            "file_key": file_key,
-            "size": len(pdf_bytes),
-            "filename": filename,
-            "data": cheat_sheet_dict,
-        }
-        if project_id:
-            result["project_id"] = project_id
-        return result
-
 
     async def stream_cheat_sheet_sections(
         self,
@@ -416,11 +230,9 @@ class CheatSheetService:
         流式 Cheat Sheet 生成器，供 SSE 端点使用。
         Yields SSE 格式字符串（已含 "data: ...\n\n" 前缀）。
 
-        注意：此方法跳过 PDF 生成和 S3 上传（流式场景不需要）。
         """
         import asyncio, json as _json
 
-        # --- 步骤 1-3：与 create_cheat_sheet_flow 完全相同 ---
         # 1) budget
         if not request_data.selected_topics:
             default_topics = [TopicInput(title="General Topics", relevance_score=1.0)]
@@ -513,22 +325,29 @@ class CheatSheetService:
         # --- 步骤 4：流式 LLM 调用 + NDJSON 解析 ---
         buffer = ""
 
-        # generate_text_stream 是同步生成器，用 run_in_executor 包到线程池
-        loop = asyncio.get_event_loop()
+        # generate_text_stream 是同步生成器：生产者在线程池里跑，
+        # 每拿到一个 chunk 就通过 call_soon_threadsafe 推入 asyncio.Queue，
+        # 主协程边取边解析边 yield，不等整份生成结束。
+        import threading
 
-        def _collect_stream():
-            """在线程里收集流式 chunk，放入同步队列。"""
-            import queue as _q
-            q = _q.Queue()
+        loop = asyncio.get_running_loop()
+        chunk_queue: asyncio.Queue = asyncio.Queue()
+        stop_event = threading.Event()  # 客户端断开时通知生产者提前退出
+        _SENTINEL = object()
+
+        def _produce():
             try:
                 for text in self.gemini.generate_text_stream(prompt):
-                    q.put(text)
+                    if stop_event.is_set():
+                        break
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
+            except Exception as exc:  # 异常转交给主协程抛出
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, exc)
             finally:
-                q.put(None)  # 哨兵：流结束
-            return q
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, _SENTINEL)
 
-        # 在线程池里运行同步流
-        sync_queue = await loop.run_in_executor(None, _collect_stream)
+        # 不 await：队列创建后立即进入消费循环
+        producer = loop.run_in_executor(None, _produce)
 
         # 从同步队列取 chunk，解析 NDJSON
         # Gemini 实际输出的是「扁平格式」：section header 和每条 item 各占一行。
@@ -601,15 +420,22 @@ class CheatSheetService:
 
             return to_yield
 
-        while True:
-            chunk_text = await loop.run_in_executor(None, sync_queue.get)
-            if chunk_text is None:
-                break
-            buffer += chunk_text
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                for sse in _process_line(line):
-                    yield sse
+        try:
+            while True:
+                chunk_text = await chunk_queue.get()
+                if chunk_text is _SENTINEL:
+                    break
+                if isinstance(chunk_text, Exception):
+                    raise chunk_text
+                buffer += chunk_text
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    for sse in _process_line(line):
+                        yield sse
+        finally:
+            # 正常结束 / 客户端断开（GeneratorExit）/ 异常，都让生产者线程尽快停止
+            stop_event.set()
+        await producer
 
         # 处理最后一行（Gemini 有时无换行结尾）
         if buffer.strip():

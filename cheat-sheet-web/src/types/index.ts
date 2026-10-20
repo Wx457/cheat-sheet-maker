@@ -91,13 +91,7 @@ export interface UISection extends Section {
   isStreaming: boolean
 }
 
-// ── Task polling ───────────────────────────────────────────────────────────
-
-export interface TaskResponse {
-  task_id: string
-  status: 'pending' | 'processing' | 'complete' | 'failed'
-  message?: string
-}
+// ── Outline ────────────────────────────────────────────────────────────────
 
 export interface OutlineTaskResult {
   topics: TopicNode[]

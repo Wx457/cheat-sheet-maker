@@ -6,7 +6,7 @@ from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
 from pydantic import BaseModel
 
 from app.application.services.ingestion_service import IngestionService
-from app.infrastructure.rag.vector_store import QuotaExceededError
+from app.infrastructure.rag.qdrant_store import QuotaExceededError
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ async def ingest_text(
     """
     将文本摄入到 RAG 知识库
 
-    接收原始文本，切分后存入 MongoDB Atlas Vector Search。
+    接收原始文本，切分后存入 Qdrant 向量库。
     """
     try:
         ingestion = IngestionService.default()
@@ -150,7 +150,7 @@ async def ingest_file(
     """
     将 PDF 文件摄入到 RAG 知识库
 
-    接收 PDF 文件，提取文本后切分并存入 MongoDB Atlas Vector Search。
+    接收 PDF 文件，提取文本后切分并存入 Qdrant 向量库。
     """
     try:
         # 读取文件内容
@@ -208,12 +208,9 @@ async def delete_user_chunks(
 @router.post("/clear", response_model=ClearResponse)
 async def clear_vector_data() -> ClearResponse:
     """
-    清理 MongoDB 中的旧向量数据
+    清理所有向量数据（重置 Qdrant collection）。
 
-    由于模型从 HuggingFace (768 维) 更换为 OpenAI (1536 维)，
-    旧的向量数据必须清除，否则会报维度不匹配错误。
-
-    注意：此操作会删除所有向量数据，请谨慎使用。
+    注意：此操作会删除所有用户的向量数据，请谨慎使用。
     """
     try:
         ingestion = IngestionService.default()

@@ -8,7 +8,8 @@ load_dotenv()
 class Settings:
     """应用配置类，从环境变量读取配置"""
 
-    # MongoDB 配置
+    # TODO: DEPRECATED (Phase 1/3) — MongoDB config; remove after auth moves to Clerk (Phase 2)
+    # and project persistence moves to Supabase (Phase 3).
     MONGODB_URI: str = os.getenv("MONGODB_URI", "")
     DB_NAME: str = os.getenv("DB_NAME", "cheat_sheet_db")
     COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "knowledge_base")
@@ -73,6 +74,8 @@ class Settings:
 
     @classmethod
     def validate(cls) -> None:
+        # TODO: DEPRECATED — MONGODB_URI and JWT_SECRET_KEY checks; this method is never
+        # called. Remove after Phase 2 (Clerk) and Phase 3 (Supabase) migrations.
         """验证必需的配置项"""
         if not cls.MONGODB_URI:
             raise ValueError("MONGODB_URI 未在环境变量中设置")

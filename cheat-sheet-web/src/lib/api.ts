@@ -1,13 +1,12 @@
 /**
  * FastAPI 请求封装
  *
- * 封装所有非流式端点（摄入、大纲生成、任务轮询）。
+ * 封装所有非流式端点（摄入、大纲生成、知识库管理）。
  * 流式生成端点（/api/generate/stream）由 lib/streaming.ts 单独处理。
  */
 
 import type {
   GenerateOutlineRequest,
-  TaskResponse,
   OutlineTaskResult,
 } from '@/types'
 
@@ -97,90 +96,21 @@ export async function ingestText(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 大纲生成（异步任务）
+// 大纲生成
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 提交大纲生成任务（POST /api/outline），立即返回 task_id。
- */
-export async function submitOutlineTask(
-  payload: GenerateOutlineRequest,
-  userId: string,
-): Promise<TaskResponse> {
-  return apiFetch<TaskResponse>('/api/outline', {
-    method: 'POST',
-    headers: { 'X-User-ID': userId },
-    body: JSON.stringify(payload),
-  })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 任务状态轮询
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface PollResult<T = unknown> {
-  status: 'pending' | 'processing' | 'complete' | 'failed'
-  data?: T
-  error?: string
-}
-
-/**
- * 查询 ARQ 任务结果（GET /api/task/{taskId}）。
- */
-export async function getTaskResult<T = unknown>(
-  taskId: string,
-): Promise<PollResult<T>> {
-  return apiFetch<PollResult<T>>(`/api/task/${taskId}`, {
-    method: 'GET',
-  })
-}
-
-/**
- * 轮询直到任务完成或超时。
- *
- * @param taskId        ARQ 任务 ID
- * @param intervalMs    轮询间隔（默认 2000ms）
- * @param timeoutMs     超时上限（默认 120000ms = 2 分钟）
- */
-export async function pollUntilDone<T = unknown>(
-  taskId: string,
-  intervalMs = 2000,
-  timeoutMs = 120_000,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-
-  while (Date.now() < deadline) {
-    const result = await getTaskResult<T>(taskId)
-
-    if (result.status === 'complete') {
-      if (result.data === undefined) throw new Error('Task complete but no data returned')
-      return result.data
-    }
-
-    if (result.status === 'failed') {
-      throw new Error(result.error ?? 'Task failed with unknown error')
-    }
-
-    // pending / processing → 等待后重试
-    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs))
-  }
-
-  throw new Error(`Task ${taskId} timed out after ${timeoutMs}ms`)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 便捷封装：提交大纲任务 + 等待结果
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 一步完成大纲生成：提交任务 → 轮询 → 返回 OutlineTaskResult。
+ * 生成大纲（POST /api/outline）。后端在请求内完成 RAG + LLM，直接返回 topics。
  */
 export async function generateOutline(
   payload: GenerateOutlineRequest,
   userId: string,
 ): Promise<OutlineTaskResult> {
-  const { task_id } = await submitOutlineTask(payload, userId)
-  return pollUntilDone<OutlineTaskResult>(task_id)
+  return apiFetch<OutlineTaskResult>('/api/outline', {
+    method: 'POST',
+    headers: { 'X-User-ID': userId },
+    body: JSON.stringify(payload),
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

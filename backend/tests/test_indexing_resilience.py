@@ -1,3 +1,5 @@
+# TODO: DEPRECATED — tests MongoDB VectorStore resilience (mongo_retry_attempts, Atlas fallback);
+# rewrite for QdrantVectorStore (immediately consistent, no retry needed) in Phase 1 cleanup.
 """Tests for Atlas indexing resilience — exponential backoff + MongoDB fallback (Problem 2)."""
 
 from __future__ import annotations
@@ -38,7 +40,6 @@ def _make_service(
     svc = CheatSheetService(
         gemini=MagicMock(),
         rag_service=rag,
-        storage_client=MagicMock(),
     )
     return svc
 

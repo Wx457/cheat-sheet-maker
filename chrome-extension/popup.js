@@ -32,7 +32,7 @@ let lastIngestAt = null
 
 // Outline page state
 let outlineTopics = []       // [{title: string, checked: boolean}]
-let outlinePollTimer = null
+let outlineAbort = null      // AbortController for the in-flight /api/outline request
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 工具函数
@@ -354,7 +354,7 @@ async function syncChunkCountFromServer() {
 function showFormPage() {
   document.getElementById('view-form').style.display = ''
   document.getElementById('view-outline').style.display = 'none'
-  if (outlinePollTimer) { clearInterval(outlinePollTimer); outlinePollTimer = null }
+  if (outlineAbort) { outlineAbort.abort(); outlineAbort = null }
 }
 
 function showOutlinePage() {
@@ -387,46 +387,6 @@ function showOutlineError(msg) {
   document.getElementById('outlineContent').style.display = 'none'
   document.getElementById('outlineError').style.display = 'block'
   document.getElementById('outlineErrorMsg').textContent = msg || 'Failed to generate outline.'
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Outline polling
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function pollForOutlineTopics(taskId) {
-  const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
-  if (outlinePollTimer) clearInterval(outlinePollTimer)
-
-  outlinePollTimer = setInterval(async () => {
-    try {
-      const headers = await getHeaders()
-      const res = await fetch(`${API_BASE_URL}/api/task/${taskId}`, { method: 'GET', headers })
-      if (!res.ok) throw new Error(`Task check failed (HTTP ${res.status})`)
-      const data = await res.json()
-
-      if (data.status === 'complete' || data.status === 'completed') {
-        clearInterval(outlinePollTimer); outlinePollTimer = null
-
-        // worker returns {"success": bool, "data": OutlineResponse}
-        // task.py passes job_result as-is, so result = {"success":..., "data":{topics:[...]}}
-        const workerResult = data.result || {}
-        if (workerResult.success === false) {
-          showOutlineError(workerResult.error || 'Outline generation failed.')
-          return
-        }
-        const outline = workerResult.data || workerResult   // unwrap data wrapper if present
-        const topics = outline.topics || []
-        outlineTopics = topics.map(t => ({ title: t.title, checked: true }))
-        showOutlineContent()
-      } else if (data.status === 'failed') {
-        clearInterval(outlinePollTimer); outlinePollTimer = null
-        showOutlineError(data.error || 'Outline generation failed.')
-      }
-    } catch (err) {
-      clearInterval(outlinePollTimer); outlinePollTimer = null
-      showOutlineError(err.message || 'Failed to check outline status.')
-    }
-  }, 2000)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -509,7 +469,7 @@ function handleAddTopic() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ★ handleNextToOutline — form page "Review Topics →" button
-// Calls POST /api/outline → shows outline page → starts polling
+// Shows outline page → POST /api/outline (returns topics directly) → renders list
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function handleNextToOutline() {
@@ -525,6 +485,10 @@ async function handleNextToOutline() {
   showOutlineLoading()
   outlineTopics = []
 
+  if (outlineAbort) outlineAbort.abort()
+  const controller = new AbortController()
+  outlineAbort = controller
+
   try {
     const headers = await getHeaders()
     const body = {
@@ -536,14 +500,17 @@ async function handleNextToOutline() {
     if (formData.examType)   body.exam_type    = EXAM_MAP[formData.examType] || undefined
 
     const res = await fetch(`${API_BASE_URL}/api/outline`, {
-      method: 'POST', headers, body: JSON.stringify(body),
+      method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
     })
     if (!res.ok) throw new Error(await parseErrorMessage(res, 'Outline request failed'))
-    const data = await res.json()
-    if (!data.task_id) throw new Error('No task ID returned from outline API')
-    pollForOutlineTopics(data.task_id)
+    const outline = await res.json()   // OutlineResponse: { topics: [{title, relevance_score}], degraded_reason? }
+    outlineTopics = (outline.topics || []).map(t => ({ title: t.title, checked: true }))
+    showOutlineContent()
   } catch (err) {
-    showOutlineError(err.message || 'Failed to start outline generation.')
+    if (err.name === 'AbortError') return   // user went back to the form page
+    showOutlineError(err.message || 'Outline generation failed.')
+  } finally {
+    if (outlineAbort === controller) outlineAbort = null
   }
 }
 

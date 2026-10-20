@@ -8,8 +8,3 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
-
-  worker:
-    command: arq app.worker.WorkerSettings --watch app
-    volumes:
-      - ./backend:/app

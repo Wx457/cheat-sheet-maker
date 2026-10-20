@@ -23,8 +23,8 @@ Chrome Extension                    Web App (cheat-sheet-web, Next.js)
 cheat-sheet-maker/
 │
 ├── backend/                              ✅ FastAPI 后端
-│   ├── main.py                           🔨 移除 ARQ lifespan、static 挂载、S3/Playwright 初始化
-│   ├── requirements.txt                  🔨 移除 boto3、arq、playwright、bcrypt、PyJWT；
+│   ├── main.py                           🔨 ARQ lifespan 已移除 ✅；待移除 static 挂载
+│   ├── requirements.txt                  🔨 arq 已移除 ✅；待移除 boto3、playwright、bcrypt、PyJWT；
 │   │                                        新增 qdrant-client、cohere、supabase（随对应 Phase）
 │   ├── requirements-dev.txt              ✅
 │   ├── pyproject.toml                    ✅
@@ -32,13 +32,11 @@ cheat-sheet-maker/
 │   │
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── generate.py               🔨 保留 SSE 流端点 + outline 端点；
-│   │   │   │                                移除 ARQ enqueue 的 generate_cheat_sheet 端点
-│   │   │   ├── plugin.py                 🔨 移除 S3 下载、download_cheat_sheet、
-│   │   │   │                                plugin_generate_final 等 PDF/S3 相关端点
+│   │   │   ├── generate.py               ✅ SSE 流端点 + outline 端点（请求内同步返回 OutlineResponse，不走队列）
+│   │   │   ├── plugin.py                 🔨 analyze / generate-final 已移除 ✅；
+│   │   │   │                                待移除 project / download_cheat_sheet 等 PDF 端点
 │   │   │   ├── rag.py                    ✅ ingest / search / clear
-│   │   │   ├── task.py                   🔨 仅保留 ingest 进度轮询；
-│   │   │   │                                移除 cheat sheet 生成任务查询
+│   │   │   ├── task.py                   ✅ 已删除（ingest 本身同步，无任务可查）
 │   │   │   └── auth.py                   🗑 login / register 端点（→ Clerk，Phase 2）
 │   │   │
 │   │   ├── core/
@@ -69,14 +67,14 @@ cheat-sheet-maker/
 │   │   │   │   ├── openai_client.py      ✅ Embedding
 │   │   │   │   └── retry_utils.py        ✅
 │   │   │   ├── rag/
-│   │   │   │   ├── vector_store.py       🗑 MongoDB Atlas Vector Search → 整体替换（Phase 1）
+│   │   │   │   ├── vector_store.py       🗑 MongoDB 旧实现；app 代码已不再导入（IngestResult/QuotaExceededError 已移至 qdrant_store.py），仅剩 eval 脚本和两个旧测试引用
 │   │   │   │   └── qdrant_store.py       ➕ 新增，替换 vector_store.py（Phase 1）
 │   │   │   ├── llm/cohere_client.py      ➕ 新增，Cohere Rerank 客户端（Phase 1）
 │   │   │   ├── cache/redis_cache.py      ➕ 新增，SSE 结果缓存（Phase 5）
 │   │   │   ├── pdf/                      🗑 整目录删除（renderer.py，Playwright 无头渲染）
 │   │   │   └── storage/                  🗑 整目录删除（minio_client.py，AWS S3）
 │   │   │
-│   │   └── worker.py                     🗑 ARQ Worker 进程（无头渲染/S3移除后整体删除）
+│   │   └── worker.py                     ✅ 已删除
 │   │
 │   ├── static/                           🗑 整目录删除（旧 React 构建产物，为 Playwright 服务）
 │   │   ├── index.html
@@ -95,14 +93,13 @@ cheat-sheet-maker/
 │       ├── test_indexing_resilience.py   🔨 MongoDB 换 Qdrant 后重写
 │       ├── test_ingest_quota.py          🔨
 │       ├── test_llm_retry.py             ✅
-│       ├── test_rag_api.py               🔨
-│       └── test_task_api.py              🔨
+│       └── test_rag_api.py               🔨
 │
 ├── cheat-sheet-web/                      ✅ Next.js Webapp（主前端，持续开发）
 │   └── src/
 │       ├── app/
 │       │   ├── layout.tsx                ✅
-│       │   ├── page.tsx                  ✅ 重定向到 /editor
+│       │   ├── （无根 page.tsx）         ✅ "/" → /editor 由 next.config.ts redirects() 处理
 │       │   └── editor/page.tsx           🔨 Phase 7 KaTeX + 格式预设；Phase 2 Clerk 接入
 │       ├── components/
 │       │   ├── CheatSheetCard.tsx        🔨 Phase 7 KaTeX 查看/编辑双态
@@ -127,8 +124,8 @@ cheat-sheet-maker/
 │
 ├── frontend/                             🗑 整目录删除（旧 Vite+React，已被 cheat-sheet-web 取代）
 │
-├── docker-compose.yml                    🔨 移除 worker 服务；新增 qdrant 服务（Phase 1）
-├── docker-compose.override.yml           🔨 同步调整
+├── docker-compose.yml                    ✅ worker 服务已移除；qdrant 服务已新增
+├── docker-compose.override.yml           ✅ worker 已移除
 ├── deploy-prod.sh                        🔨 移除 worker 部署步骤
 └── .github/workflows/backend-tests.yml  🔨 随测试变动同步
 ```
@@ -139,9 +136,11 @@ cheat-sheet-maker/
 
 | Phase | 内容 | 状态 |
 |-------|------|------|
+| 6 | SSE 流式渲染 | ✅ 2026-10-20 修复：生产者线程不再阻塞到生成结束，section 逐个推送 |
 | 6-6 | 刷新丢失卡片状态（zustand persist） | ⏳ |
-| 7 | KaTeX 渲染 + 格式预设（多栏/字号/纸张） | ⏳ |
-| 1 | Qdrant 替换 MongoDB Vector Search + Cohere Rerank | ⏳ |
+| 7 | KaTeX 渲染 + 格式预设（多栏/字号/纸张） | 🟡 7-1 KaTeX 查看/编辑双态已完成；7-2~7-4 预设/多栏/字号待做 |
+| 1 | Qdrant 替换 MongoDB Vector Search + Cohere Rerank | 🟡 qdrant_store、Cohere rerank、config、compose qdrant 服务、迁移脚本已完成；待删 vector_store.py（app 已不依赖，仅 eval 脚本 + 2 个旧测试引用）、测试改写 |
+| 清理 | 移除 ARQ/worker、pdf/、storage/、static/、frontend/、AWS 配置及依赖 | 🟡 ARQ/worker/task.py 已移除（大纲改为请求内同步）；storage/ 已无引用可删；pdf/ 仍被 plugin.py PDF 端点引用 |
 | 3 | Supabase 持久化（用户/小抄历史） | ⏳ |
 | 2 | Clerk 鉴权（替换 bcrypt/PyJWT，插件↔webapp 无感互通） | ⏳ |
 | 5 | Redis Cache Layer（SSE 结果缓存） | ⏳ |

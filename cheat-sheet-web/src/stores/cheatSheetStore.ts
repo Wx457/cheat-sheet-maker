@@ -9,7 +9,6 @@ import type { UISection, ContentItem } from '@/types'
 
 export type StreamStatus =
   | 'idle'
-  | 'awaiting_rag'   // 轮询 RAG ingest 任务完成（插件 → webapp 流程）
   | 'connecting'     // SSE 连接中
   | 'streaming'      // 卡片流式渲染中
   | 'complete'
@@ -23,13 +22,10 @@ interface CheatSheetState {
   // ── 流式状态 ────────────────────────────────────────────────────────────
   status: StreamStatus
   error: string | null
-  /** RAG 任务伪进度 0–100（awaiting_rag 阶段递增，后端有真实进度时替换）*/
-  ragProgress: number
 
   // ── 流式写入 actions（由 streaming.ts 调用） ────────────────────────────
   setStatus: (status: StreamStatus) => void
   setError: (msg: string | null) => void
-  setRagProgress: (progress: number) => void
   setMetaTitle: (title: string) => void
   /** 追加一个新 section（流式场景：isStreaming=true），返回生成的 id */
   addSection: (section: Omit<UISection, 'id' | 'isStreaming'>) => string
@@ -72,14 +68,11 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   sections: [],
   status: 'idle',
   error: null,
-  ragProgress: 0,
 
   // ── 流式写入 ──────────────────────────────────────────────────────────────
   setStatus: (status) => set({ status }),
 
   setError: (error) => set({ error, status: 'error' }),
-
-  setRagProgress: (ragProgress) => set({ ragProgress }),
 
   setMetaTitle: (title) => set({ metaTitle: title }),
 
@@ -133,7 +126,6 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
       sections: [],
       status: 'idle',
       error: null,
-      ragProgress: 0,
     }),
 
   // ── 用户编辑 ──────────────────────────────────────────────────────────────

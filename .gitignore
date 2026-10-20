@@ -37,3 +37,10 @@ Desktop.ini
 # Packaging artifacts that may appear in the root
 *.zip
 *.crx
+
+# Personal learning notes (not project engineering)
+LANGCHAIN_CONCEPTS.md
+PROJECT_ARCHITECTURE.md
+cheat-sheet-web/AGENTS.md
+UPGRADE_PLAN.md
+.claude/settings.local.json

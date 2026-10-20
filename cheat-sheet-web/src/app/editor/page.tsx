@@ -5,21 +5,21 @@
  *
  * 数据流：
  *   Chrome Extension（插件）
- *     → POST /api/rag/ingest → 得到 task_id
- *     → 立即 chrome.tabs.create({ url: '/editor?token=JWT&taskId=xxx&userId=x&...' })
+ *     → POST /api/rag/ingest（同步，知识库建好才返回）
+ *     → POST /api/outline → 用户在插件内勾选 topics
+ *     → chrome.tabs.create({ url: '/editor?userId=x&topics=[...]&...' })
  *
  *   Webapp（本页）
  *     → ① 读取 URL 参数
  *     → ② 将 token 存入 sessionStorage（6-3：auth token 过渡方案）
- *     → ③ 若有 taskId：进入 awaiting_rag，轮询 /api/task/{taskId}（6-2）
- *     → ④ RAG 完成后自动触发 POST /api/generate/stream（SSE）
- *     → ⑤ 用户拖拽 / 编辑 / 导出 PDF
- *     → ⑥ 刷新时若正在生成：beforeunload 警告（6-4）
+ *     → ③ 自动触发 POST /api/generate/stream（SSE）
+ *     → ④ 用户拖拽 / 编辑 / 导出 PDF
+ *     → ⑤ 刷新时若正在生成：beforeunload 警告（6-4）
  *
  * 页面状态机：
- *   idle → awaiting_rag → connecting → streaming → complete
- *          (轮询 taskId)   (SSE)                      |
- *                                                  error（任意阶段可跳入）
+ *   idle → connecting → streaming → complete
+ *            (SSE)                     |
+ *                                   error（任意阶段可跳入）
  *
  * ⚠️  useSearchParams() 必须在 <Suspense> 内使用（Next.js App Router 要求）
  */
@@ -28,7 +28,7 @@ import { Suspense, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useCheatSheetStore } from '@/stores/cheatSheetStore'
 import { startStreaming } from '@/lib/streaming'
-import { getTaskResult, storeAuthToken } from '@/lib/api'
+import { storeAuthToken } from '@/lib/api'
 import CardList from '@/components/CardList'
 import StreamingStatus from '@/components/StreamingStatus'
 import type {
@@ -95,7 +95,6 @@ function DevSimulatorPanel() {
     const examType = fd.get('examType') as string
     if (examType) params.set('examType', examType)
 
-    // 注意：dev 模式下不设 taskId，直接跳过 awaiting_rag 进入 SSE
     router.push(`/editor?${params.toString()}`)
   }
 
@@ -191,41 +190,6 @@ function WaitingForPlugin() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RAG 等待界面（awaiting_rag 状态）
-// ─────────────────────────────────────────────────────────────────────────────
-
-function AwaitingRagView({ progress }: { progress: number }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-32 gap-5">
-      {/* Spinner */}
-      <div className="h-10 w-10 rounded-full border-2 border-zinc-200 dark:border-zinc-700 border-t-purple-500 animate-spin" />
-
-      <div className="flex flex-col items-center gap-1.5 text-center">
-        <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Building knowledge base…
-        </p>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          The extension is ingesting your page content. This takes a few seconds.
-        </p>
-      </div>
-
-      {/* Progress bar（仅在有进度值时显示） */}
-      {progress > 0 && (
-        <div className="w-52 flex flex-col items-end gap-1">
-          <span className="text-[10px] text-zinc-400">{progress}%</span>
-          <div className="w-full h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
-            <div
-              className="h-full bg-purple-500 transition-all duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // EditorContent — 有插件参数时渲染（需要 Suspense 包裹）
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -235,35 +199,33 @@ function EditorContent() {
   // ── 从 URL 读取插件传入的参数 ───────────────────────────────────────────────
   const userId    = searchParams.get('userId')  ?? ''
   const token     = searchParams.get('token')   ?? null   // 6-3：auth JWT
-  const taskId    = searchParams.get('taskId')  ?? null   // 6-2：RAG ingest task ID
   const context   = searchParams.get('context') ?? undefined
   const level     = (searchParams.get('level')     as AcademicLevel)   ?? 'undergraduate'
   const pageLimit = (searchParams.get('pageLimit') as PageLimit)       ?? '1_page'
   const archetype = (searchParams.get('archetype') as CourseArchetype) ?? 'general'
   const examType  = (searchParams.get('examType')  as ExamType | null) ?? undefined
 
+  // 依赖用字符串而非 searchParams 对象：URL 其他参数变化时不重新解析，
+  // selectedTopics 引用保持稳定，避免 runStreaming 被无谓重建
+  const topicsParam = searchParams.get('topics')
   const selectedTopics = useMemo<TopicInput[] | undefined>(() => {
-    const raw = searchParams.get('topics')
-    if (!raw) return undefined
+    if (!topicsParam) return undefined
     try {
-      const titles: string[] = JSON.parse(raw)
+      const titles: string[] = JSON.parse(topicsParam)
       return titles.map((title) => ({ title, relevance_score: 1 }))
     } catch { return undefined }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get('topics')])
+  }, [topicsParam])
 
   const hasPluginParams = !!searchParams.get('userId')
 
   // ── Zustand store ──────────────────────────────────────────────────────────
   const status              = useCheatSheetStore((s) => s.status)
   const error               = useCheatSheetStore((s) => s.error)
-  const ragProgress         = useCheatSheetStore((s) => s.ragProgress)
   const metaTitle           = useCheatSheetStore((s) => s.metaTitle)
   const sections            = useCheatSheetStore((s) => s.sections)
   const reset               = useCheatSheetStore((s) => s.reset)
   const setStatus           = useCheatSheetStore((s) => s.setStatus)
   const setError            = useCheatSheetStore((s) => s.setError)
-  const setRagProgress      = useCheatSheetStore((s) => s.setRagProgress)
   const setMetaTitle        = useCheatSheetStore((s) => s.setMetaTitle)
   const mergeOrAddSection   = useCheatSheetStore((s) => s.mergeOrAddSection)
 
@@ -272,8 +234,6 @@ function EditorContent() {
   const startedRef = useRef(false)   // 防止 StrictMode / URL 变化重复触发
 
   // ── 派生状态 ───────────────────────────────────────────────────────────────
-  const isAwaitingOrGenerating =
-    status === 'awaiting_rag' || status === 'connecting' || status === 'streaming'
   const isGenerating = status === 'connecting' || status === 'streaming'
   const canExport    = sections.length > 0
 
@@ -282,7 +242,7 @@ function EditorContent() {
     if (token) storeAuthToken(token)
   }, [token])
 
-  // ── SSE 流式生成（被 auto-trigger 或 RAG 轮询完成后调用） ────────────────────
+  // ── SSE 流式生成（被 auto-trigger / Retry 调用） ─────────────────────────────
   const runStreaming = useCallback(async () => {
     const controller = new AbortController()
     abortRef.current = controller
@@ -315,7 +275,7 @@ function EditorContent() {
     setStatus, setError, setMetaTitle, mergeOrAddSection,
   ])
 
-  // ── 6-2：自动触发（有插件参数时） ──────────────────────────────────────────
+  // ── 自动触发（有插件参数时） ────────────────────────────────────────────────
   useEffect(() => {
     if (!hasPluginParams) return
     if (startedRef.current) return
@@ -323,12 +283,7 @@ function EditorContent() {
 
     startedRef.current = true
     reset()
-
-    if (taskId) {
-      setStatus('awaiting_rag')
-    } else {
-      runStreaming()
-    }
+    runStreaming()
 
     return () => {
       abortRef.current?.abort()
@@ -342,47 +297,13 @@ function EditorContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPluginParams])
 
-  // ── 6-2：RAG 任务轮询（awaiting_rag 阶段） ──────────────────────────────────
+  // ── 6-4：刷新警告（生成中时拦截） ────────────────────────────────────────────
   useEffect(() => {
-    if (status !== 'awaiting_rag' || !taskId) return
-
-    let fakeProgress = 0   // 伪进度（后端有真实进度时替换 setRagProgress 来源）
-
-    const interval = setInterval(async () => {
-      try {
-        const result = await getTaskResult(taskId)
-
-        // 伪进度递增（每 2 秒 +5~8%，上限 90%）
-        fakeProgress = Math.min(90, fakeProgress + 5 + Math.random() * 3)
-        setRagProgress(Math.round(fakeProgress))
-
-        if (result.status === 'complete') {
-          clearInterval(interval)
-          setRagProgress(100)
-          // 稍作停顿让进度条动画完成
-          setTimeout(() => runStreaming(), 300)
-        }
-
-        if (result.status === 'failed') {
-          clearInterval(interval)
-          setError(result.error ?? 'Knowledge base build failed. Please retry.')
-        }
-      } catch (err) {
-        clearInterval(interval)
-        setError(err instanceof Error ? err.message : 'Failed to check task status')
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [status, taskId, runStreaming, setRagProgress, setError])
-
-  // ── 6-4：刷新警告（生成中 / 等待中时拦截） ──────────────────────────────────
-  useEffect(() => {
-    if (!isAwaitingOrGenerating) return
+    if (!isGenerating) return
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [isAwaitingOrGenerating])
+  }, [isGenerating])
 
   // ── 操作处理 ───────────────────────────────────────────────────────────────
   const handleCancel = () => {
@@ -394,11 +315,7 @@ function EditorContent() {
   const handleRetry = () => {
     startedRef.current = false
     reset()
-    if (taskId) {
-      setStatus('awaiting_rag')  // 重新进入轮询
-    } else {
-      runStreaming()
-    }
+    runStreaming()
     startedRef.current = true
   }
 
@@ -421,13 +338,13 @@ function EditorContent() {
           <span className="text-zinc-300 dark:text-zinc-700 select-none">|</span>
 
           <span className="flex-1 text-sm text-zinc-500 dark:text-zinc-400 truncate min-w-0">
-            {metaTitle || (isAwaitingOrGenerating ? '…' : 'Ready')}
+            {metaTitle || (isGenerating ? '…' : 'Ready')}
           </span>
 
           <StreamingStatus />
 
-          {/* Cancel：等待 / 生成中可见 */}
-          {isAwaitingOrGenerating && (
+          {/* Cancel：生成中可见 */}
+          {isGenerating && (
             <button onClick={handleCancel}
               className="text-xs px-3 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
               Cancel
@@ -458,11 +375,6 @@ function EditorContent() {
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-6 py-6">
 
-          {/* 6-2：RAG 等待界面 */}
-          {status === 'awaiting_rag' && (
-            <AwaitingRagView progress={ragProgress} />
-          )}
-
           {/* 错误信息块 */}
           {status === 'error' && error && (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
@@ -470,19 +382,17 @@ function EditorContent() {
             </div>
           )}
 
-          {/* 小抄标题（cards 上方，RAG 完成后出现） */}
-          {metaTitle && status !== 'awaiting_rag' && (
+          {/* 小抄标题（cards 上方，收到 meta 后出现） */}
+          {metaTitle && (
             <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-50 mb-6 print:text-base print:mb-3">
               {metaTitle}
             </h1>
           )}
 
           {/* print-area：@media print 变两栏（见 globals.css） */}
-          {status !== 'awaiting_rag' && (
-            <div className="print-area">
-              <CardList />
-            </div>
-          )}
+          <div className="print-area">
+            <CardList />
+          </div>
 
         </div>
       </main>

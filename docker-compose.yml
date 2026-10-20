@@ -70,37 +70,6 @@ services:
     networks:
       - app_network
 
-  # 4. ARQ Worker (consumer)
-  worker:
-    init: true
-    build: 
-      context: ./backend
-    container_name: cheat-worker
-    restart: unless-stopped
-    command: arq app.worker.WorkerSettings
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - PDF_GENERATION_HOST=http://backend:8000
-      - PYTHONDONTWRITEBYTECODE=1
-    env_file:
-      - ./backend/.env
-    depends_on:
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os,sys,socket; s=socket.socket(); s.settimeout(3); s.connect((os.getenv('REDIS_HOST','redis'), int(os.getenv('REDIS_PORT','6379')))); s.close(); sys.exit(0)\""]
-      interval: 20s
-      timeout: 8s
-      retries: 5
-      start_period: 30s
-    networks:
-      - app_network
-
 volumes:
   redis_data:
   qdrant_storage:

@@ -9,11 +9,8 @@ Jinja2==3.1.6  # 模板渲染
 
 # Database
 pymongo==4.15.5
-pymongo-search-utils==0.1.0
-motor==3.7.1  # 异步 Mongo 驱动 (LangChain 依赖)
 
-# Task Queue
-arq==0.26.3
+# Redis client（Phase 5 SSE 结果缓存将使用）
 redis==5.3.1
 hiredis==3.3.0
 
@@ -37,7 +34,6 @@ qdrant-client==1.14.3
 cohere==5.15.0
 langchain==1.2.0
 langchain-core==1.2.5
-langchain-mongodb==0.9.0
 langchain-text-splitters==1.1.0
 numpy==2.2.6  # 向量计算
 

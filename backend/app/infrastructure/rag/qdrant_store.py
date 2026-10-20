@@ -5,7 +5,7 @@ import asyncio
 import io
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 from uuid import uuid4
 
 import numpy as np
@@ -24,9 +24,20 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.infrastructure.llm.openai_client import OpenAIClient
-from app.infrastructure.rag.vector_store import IngestResult, QuotaExceededError
 
 logger = logging.getLogger(__name__)
+
+
+class QuotaExceededError(Exception):
+    """Raised when a user's knowledge base has reached its chunk limit."""
+
+
+class IngestResult(TypedDict):
+    chunks_count: int
+    ingest_batch_id: str
+    ingest_at: datetime
+    truncated: bool
+    original_chunks_count: int
 
 _COLLECTION = "cheat_sheet_chunks"
 _VECTOR_SIZE = 1536  # text-embedding-3-small output dimension

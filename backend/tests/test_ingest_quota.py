@@ -1,3 +1,4 @@
+# TODO: DEPRECATED — patches mongo_retry_attempts on old VectorStore; rewrite for QdrantVectorStore (Phase 1 cleanup).
 """Tests for ingestion quota & truncation logic (Problem 3)."""
 
 from __future__ import annotations

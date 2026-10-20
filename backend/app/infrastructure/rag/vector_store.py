@@ -1,9 +1,14 @@
+# TODO: DEPRECATED (Phase 1) — VectorStore class replaced by QdrantVectorStore (qdrant_store.py).
+# No app code imports this file anymore; only scripts/eval_retrieval_groundedness.py and
+# tests/test_indexing_resilience.py / test_ingest_quota.py still use it.
+# langchain-mongodb is no longer in requirements.txt, so importing this module fails in the image.
+# Delete this file once those scripts/tests are migrated to QdrantVectorStore.
 import asyncio
 import io
 import logging
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, TypeVar, TypedDict
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from uuid import uuid4
 
 from pymongo import MongoClient
@@ -15,21 +20,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.infrastructure.llm.openai_client import OpenAIClient
+from app.infrastructure.rag.qdrant_store import IngestResult, QuotaExceededError
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-
-
-class QuotaExceededError(Exception):
-    """Raised when a user's knowledge base has reached its chunk limit."""
-
-
-class IngestResult(TypedDict):
-    chunks_count: int
-    ingest_batch_id: str
-    ingest_at: datetime
-    truncated: bool
-    original_chunks_count: int
 
 
 class VectorStore:

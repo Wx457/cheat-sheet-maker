@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from app.domain.utils.cleaner import clean_raw_text
-from app.infrastructure.rag.qdrant_store import QdrantVectorStore, get_qdrant_store
-from app.infrastructure.rag.vector_store import IngestResult
+from app.infrastructure.rag.qdrant_store import IngestResult, QdrantVectorStore, get_qdrant_store
 
 
 @dataclass
