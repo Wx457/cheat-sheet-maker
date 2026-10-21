@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 from app.api.rag import router as rag_router
 
+from conftest import bearer
+
 
 def create_client():
     app = FastAPI()
@@ -17,7 +19,7 @@ def test_ingest_file_rejects_non_pdf_upload():
 
     response = client.post(
         "/api/rag/ingest/file",
-        headers={"X-User-ID": "user-1"},
+        headers=bearer("user-1"),
         files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")},
     )
 
@@ -25,7 +27,7 @@ def test_ingest_file_rejects_non_pdf_upload():
     assert response.json()["detail"] == "仅支持 PDF 文件格式"
 
 
-def test_ingest_text_requires_user_header():
+def test_ingest_text_requires_login():
     client = create_client()
 
     response = client.post(
@@ -33,5 +35,5 @@ def test_ingest_text_requires_user_header():
         json={"text": "hello", "source": "demo"},
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"] == ["header", "X-User-ID"]
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"

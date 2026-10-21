@@ -1,10 +1,11 @@
 import traceback
 from datetime import datetime
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile, Header
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.application.services.ingestion_service import IngestionService
+from app.core.auth import CurrentUserId, require_admin
 from app.infrastructure.rag.qdrant_store import QuotaExceededError
 
 router = APIRouter()
@@ -66,7 +67,7 @@ class ChunkCountResponse(BaseModel):
 
 @router.get("/chunks/count", response_model=ChunkCountResponse)
 async def get_chunk_count(
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）")
+    user_id: CurrentUserId,
 ) -> ChunkCountResponse:
     """
     获取当前用户的 chunks 数量
@@ -75,7 +76,7 @@ async def get_chunk_count(
     """
     try:
         ingestion = IngestionService.default()
-        chunks_count = ingestion.rag_service.get_user_chunk_count(x_user_id)
+        chunks_count = ingestion.rag_service.get_user_chunk_count(user_id)
 
         return ChunkCountResponse(status="success", chunks_count=chunks_count)
     except Exception as e:
@@ -85,8 +86,8 @@ async def get_chunk_count(
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_text(
+    user_id: CurrentUserId,
     payload: IngestRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> IngestResponse:
     """
     将文本摄入到 RAG 知识库
@@ -98,7 +99,7 @@ async def ingest_text(
         ingest_result = await ingestion.process_text(
             text=payload.text,
             metadata={"source": payload.source},
-            user_id=x_user_id,
+            user_id=user_id,
         )
 
         return IngestResponse(
@@ -118,8 +119,8 @@ async def ingest_text(
 
 @router.post("/search", response_model=SearchResponse)
 async def search_context(
+    user_id: CurrentUserId,
     payload: SearchRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> SearchResponse:
     """
     在 RAG 知识库中搜索相关内容
@@ -129,7 +130,7 @@ async def search_context(
     try:
         ingestion = IngestionService.default()
         results = await ingestion.rag_service.search_context(
-            query=payload.query, user_id=x_user_id, k=payload.top_k
+            query=payload.query, user_id=user_id, k=payload.top_k
         )
 
         # 转换为 SearchResult 对象列表
@@ -143,8 +144,8 @@ async def search_context(
 
 @router.post("/ingest/file", response_model=IngestResponse)
 async def ingest_file(
+    user_id: CurrentUserId,
     file: UploadFile = File(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> IngestResponse:
     """
     将 PDF 文件摄入到 RAG 知识库
@@ -163,7 +164,7 @@ async def ingest_file(
         ingest_result = await ingestion.process_file(
             file_content=content,
             filename=file.filename or "unknown.pdf",
-            user_id=x_user_id,
+            user_id=user_id,
         )
 
         return IngestResponse(
@@ -185,29 +186,29 @@ async def ingest_file(
 
 @router.delete("/chunks", response_model=ClearResponse)
 async def delete_user_chunks(
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
+    user_id: CurrentUserId,
 ) -> ClearResponse:
     """
     删除当前用户的知识库向量数据（用户级操作）。
 
-    仅删除 X-User-ID 对应的 chunks（及其 Supabase ingest 批次记录），不影响其他用户数据。
+    仅删除当前登录用户的 chunks（及其 Supabase ingest 批次记录），不影响其他用户数据。
     供 Chrome 插件的 "Clear KB" 按钮调用。
     """
     try:
         ingestion = IngestionService.default()
-        deleted_count = await ingestion.delete_user_data(x_user_id)
+        deleted_count = await ingestion.delete_user_data(user_id)
         return ClearResponse(status="success", deleted_count=int(deleted_count))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"删除用户知识库时发生错误: {str(e)}")
 
 
-@router.post("/clear", response_model=ClearResponse)
+@router.post("/clear", response_model=ClearResponse, dependencies=[Depends(require_admin)])
 async def clear_vector_data() -> ClearResponse:
     """
     清理所有向量数据（重置 Qdrant collection）。
 
-    注意：此操作会删除所有用户的向量数据，请谨慎使用。
+    注意：此操作会删除所有用户的向量数据，仅 ADMIN_USER_IDS 中的 Clerk 用户可调用（为空则一律 403）。
     """
     try:
         ingestion = IngestionService.default()

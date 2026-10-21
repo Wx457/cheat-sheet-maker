@@ -7,11 +7,10 @@
  *   Chrome Extension（插件）
  *     → POST /api/rag/ingest（同步，知识库建好才返回）
  *     → POST /api/outline → 用户在插件内勾选 topics
- *     → chrome.tabs.create({ url: '/editor?userId=x&topics=[...]&...' })
+ *     → chrome.tabs.create({ url: '/editor?topics=[...]&...' })
  *
  *   Webapp（本页）
- *     → ① 读取 URL 参数
- *     → ② 将 token 存入 sessionStorage（6-3：auth token 过渡方案）
+ *     → ① 读取 URL 参数；身份来自 Clerk session（proxy.ts 保护 /editor，与插件共享同一 Clerk 用户）
  *     → ③ URL 无 sheetId：自动触发 POST /api/generate/stream（SSE）
  *        URL 有 sheetId：GET /api/cheat-sheets/{id} 恢复，不重新生成（3-4-c）
  *     → ④ 生成完成后自动保存（POST），把 sheetId 写回 URL（replaceState，不重新渲染路由）
@@ -29,13 +28,13 @@
 
 import { Suspense, useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { UserButton, useAuth } from '@clerk/nextjs'
 import { useCheatSheetStore } from '@/stores/cheatSheetStore'
 import { startStreaming } from '@/lib/streaming'
 import {
   ApiError,
   createCheatSheet,
   loadCheatSheet,
-  storeAuthToken,
   updateCheatSheet,
 } from '@/lib/api'
 import SheetCanvas from '@/components/SheetCanvas'
@@ -130,7 +129,7 @@ function DevSimulatorPanel() {
     const fd = new FormData(e.currentTarget)
     const params = new URLSearchParams()
 
-    params.set('userId', (fd.get('userId') as string).trim() || 'dev-user')
+    params.set('launch', 'dev')
 
     const context = (fd.get('context') as string).trim()
     if (context) params.set('context', context)
@@ -160,10 +159,6 @@ function DevSimulatorPanel() {
         🛠 Dev Mode — Simulate Plugin Launch
       </summary>
       <form onSubmit={handleSubmit} className="flex flex-col gap-3 px-4 pb-4 pt-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-zinc-500 font-medium">User ID</label>
-          <input name="userId" defaultValue="dev-user" className={selectCls} />
-        </div>
         <div className="flex flex-col gap-1">
           <label className="text-[10px] text-zinc-500 font-medium">Context / Focus (optional)</label>
           <input name="context" placeholder="e.g. Focus on formulas" className={selectCls} />
@@ -216,7 +211,7 @@ function DevSimulatorPanel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 等待插件界面（URL 无 userId 参数时）
+// 等待插件界面（URL 无启动参数时）
 // ─────────────────────────────────────────────────────────────────────────────
 
 function WaitingForPlugin() {
@@ -249,8 +244,6 @@ function EditorContent() {
   const searchParams = useSearchParams()
 
   // ── 从 URL 读取插件传入的参数 ───────────────────────────────────────────────
-  const userId    = searchParams.get('userId')  ?? ''
-  const token     = searchParams.get('token')   ?? null   // 6-3：auth JWT
   const context   = searchParams.get('context') ?? undefined
   const level     = (searchParams.get('level')     as AcademicLevel)   ?? 'undergraduate'
   const pageLimit = (searchParams.get('pageLimit') as PageLimit)       ?? '1_page'
@@ -268,8 +261,12 @@ function EditorContent() {
     } catch { return undefined }
   }, [topicsParam])
 
-  const hasPluginParams = !!searchParams.get('userId')
   const sheetIdParam    = searchParams.get('sheetId')   // 3-4-c：已保存的小抄 id
+  // 插件打开时带 topics；刷新恢复带 sheetId；Dev 模拟面板带 launch
+  const hasPluginParams = !!(topicsParam || sheetIdParam || searchParams.get('launch'))
+
+  // ── Clerk（Phase 2）：后端请求用 session token 鉴权 ──────────────────────────
+  const { isLoaded: authLoaded, getToken } = useAuth()
 
   // ── Zustand store ──────────────────────────────────────────────────────────
   const status              = useCheatSheetStore((s) => s.status)
@@ -311,11 +308,6 @@ function EditorContent() {
       savedSnapshot.sections !== sections ||
       savedSnapshot.title !== metaTitle)
 
-  // ── 6-3：token 存入 sessionStorage ─────────────────────────────────────────
-  useEffect(() => {
-    if (token) storeAuthToken(token)
-  }, [token])
-
   // ── SSE 流式生成（被 auto-trigger / Retry 调用） ─────────────────────────────
   const runStreaming = useCallback(async () => {
     const controller = new AbortController()
@@ -333,7 +325,7 @@ function EditorContent() {
 
     await startStreaming(
       payload,
-      userId,
+      getToken,
       {
         onMeta: (e) => { setMetaTitle(e.title); setStatus('streaming') },
         onSection: (section) => {
@@ -345,7 +337,7 @@ function EditorContent() {
       controller.signal,
     )
   }, [
-    userId, context, level, pageLimit, archetype, examType, selectedTopics,
+    getToken, context, level, pageLimit, archetype, examType, selectedTopics,
     setStatus, setError, setMetaTitle, mergeOrAddSection,
   ])
 
@@ -356,7 +348,7 @@ function EditorContent() {
     loadFailureRef.current = null
     setStatus('loading')
     try {
-      loadSheet(await loadCheatSheet(id, userId, controller.signal))
+      loadSheet(await loadCheatSheet(id, getToken, controller.signal))
     } catch (err) {
       if (controller.signal.aborted) return
       // 404：不存在或不属于该用户；422：sheetId 不是合法 UUID
@@ -368,7 +360,7 @@ function EditorContent() {
           : `Could not load the saved cheat sheet: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
-  }, [userId, setStatus, setError, loadSheet])
+  }, [getToken, setStatus, setError, loadSheet])
 
   // ── 3-4-c：保存（首次 POST 并把 id 写回 URL，之后 PUT） ─────────────────────
   const persist = useCallback(() => {
@@ -381,8 +373,8 @@ function EditorContent() {
       setSaving(true)
       try {
         const record = sheetId
-          ? await updateCheatSheet(sheetId, body, userId)
-          : await createCheatSheet(body, userId)
+          ? await updateCheatSheet(sheetId, body, getToken)
+          : await createCheatSheet(body, getToken)
         if (epoch !== epochRef.current) return
         if (!sheetId) {
           setSheetId(record.id)
@@ -398,7 +390,7 @@ function EditorContent() {
         setSaving(false)
       }
     })
-  }, [userId, setSheetId, markSaved])
+  }, [getToken, setSheetId, markSaved])
 
   // 内容变化后防抖保存（生成完成时 isDirty 变为 true，也由此触发首次保存）
   useEffect(() => {
@@ -410,6 +402,7 @@ function EditorContent() {
   // ── 自动触发（有插件参数时） ────────────────────────────────────────────────
   useEffect(() => {
     if (!hasPluginParams) return
+    if (!authLoaded) return   // getToken 在 Clerk 加载完成前拿不到 token
     if (startedRef.current) return
     if (status !== 'idle') return
 
@@ -428,7 +421,7 @@ function EditorContent() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPluginParams])
+  }, [hasPluginParams, authLoaded])
 
   // ── 6-4：刷新警告（生成中，或有尚未保存的修改时拦截） ─────────────────────────
   const warnOnUnload = isGenerating || isDirty || saving
@@ -525,6 +518,8 @@ function EditorContent() {
             <DownloadIcon />
             Export PDF
           </button>
+
+          <UserButton />
 
         </div>
       </header>

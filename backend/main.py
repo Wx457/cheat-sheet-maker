@@ -10,6 +10,7 @@ from qdrant_client import QdrantClient
 from app.api import generate_router
 from app.api.rag import router as rag_router
 from app.api.cheat_sheets import router as cheat_sheets_router
+from app.api.auth import router as auth_router
 from app.core.config import settings
 
 app = FastAPI(title="Cheat Sheet Maker API")
@@ -25,6 +26,7 @@ app.add_middleware(
 app.include_router(generate_router)
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(cheat_sheets_router, tags=["CheatSheets"])
+app.include_router(auth_router, tags=["Auth"])
 
 
 # 挂载静态文件（前端构建产物）

@@ -5,6 +5,7 @@
 - PUT  /api/cheat-sheets/{id}    用户编辑 / 拖拽 / 删除后覆盖保存（前端 debounce）
 - GET  /api/cheat-sheets/{id}    刷新页面时恢复
 
+身份来自 Clerk session token（app.core.auth），映射到 users.clerk_id → users.id。
 secret key 绕过 RLS，归属校验由 SupabaseStore 按 user_id 过滤完成：
 不属于当前用户的小抄一律返回 404（不区分"不存在"与"无权限"）。
 """
@@ -13,8 +14,9 @@ import asyncio
 import traceback
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
+from app.core.auth import CurrentUserId
 from app.infrastructure.db.supabase_store import SupabaseStore, get_supabase_store
 from app.schemas import CheatSheetRecord, CheatSheetSaveRequest
 
@@ -33,15 +35,15 @@ def _require_store() -> SupabaseStore:
 
 @router.post("/api/cheat-sheets", response_model=CheatSheetRecord, status_code=201)
 async def create_cheat_sheet(
+    user_id: CurrentUserId,
     payload: CheatSheetSaveRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> CheatSheetRecord:
     store = _require_store()
     try:
-        user_id = await asyncio.to_thread(store.get_or_create_user_id, x_user_id)
+        db_user_id = await asyncio.to_thread(store.get_or_create_user_id, user_id)
         row = await asyncio.to_thread(
             store.create_cheat_sheet,
-            user_id,
+            db_user_id,
             payload.title,
             [s.model_dump() for s in payload.sections],
         )
@@ -53,16 +55,16 @@ async def create_cheat_sheet(
 
 @router.put("/api/cheat-sheets/{sheet_id}", response_model=CheatSheetRecord)
 async def update_cheat_sheet(
+    user_id: CurrentUserId,
     sheet_id: UUID,
     payload: CheatSheetSaveRequest = Body(...),
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> CheatSheetRecord:
     store = _require_store()
     try:
-        user_id = await asyncio.to_thread(store.get_or_create_user_id, x_user_id)
+        db_user_id = await asyncio.to_thread(store.get_or_create_user_id, user_id)
         row = await asyncio.to_thread(
             store.update_cheat_sheet,
-            user_id,
+            db_user_id,
             str(sheet_id),
             payload.title,
             [s.model_dump() for s in payload.sections],
@@ -77,13 +79,13 @@ async def update_cheat_sheet(
 
 @router.get("/api/cheat-sheets/{sheet_id}", response_model=CheatSheetRecord)
 async def get_cheat_sheet(
+    user_id: CurrentUserId,
     sheet_id: UUID,
-    x_user_id: str = Header(..., alias="X-User-ID", description="用户 ID（必需，用于数据隔离）"),
 ) -> CheatSheetRecord:
     store = _require_store()
     try:
-        user_id = await asyncio.to_thread(store.get_or_create_user_id, x_user_id)
-        row = await asyncio.to_thread(store.get_cheat_sheet, user_id, str(sheet_id))
+        db_user_id = await asyncio.to_thread(store.get_or_create_user_id, user_id)
+        row = await asyncio.to_thread(store.get_cheat_sheet, db_user_id, str(sheet_id))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"读取小抄时发生错误: {str(e)}")

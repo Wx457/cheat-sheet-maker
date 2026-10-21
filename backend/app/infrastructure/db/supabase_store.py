@@ -29,18 +29,58 @@ class SupabaseStore:
 
     # ── users ────────────────────────────────────────────────────────────────
 
-    def get_or_create_user_id(self, anon_id: str) -> str:
-        """插件生成的 X-User-ID（anon_id）→ users.id，不存在则创建。
+    def get_or_create_user_id(self, clerk_id: str) -> str:
+        """Clerk user id（session token 的 sub）→ users.id，不存在则创建。
 
-        upsert + on_conflict 保证并发请求下同一 anon_id 只会有一行。
+        upsert + on_conflict 保证并发请求下同一 clerk_id 只会有一行。
         """
         rows = (
             self.client.table("users")
-            .upsert({"anon_id": anon_id}, on_conflict="anon_id")
+            .upsert({"clerk_id": clerk_id}, on_conflict="clerk_id")
             .execute()
             .data
         )
         return rows[0]["id"]
+
+    def link_anon_user(self, anon_id: str, clerk_id: str) -> str:
+        """把 Phase 2 之前的匿名用户（插件生成的 anon_id）并入 Clerk 用户，只能认领一次。
+
+        返回：
+          - "linked"         Clerk 用户还没有行：直接在匿名行上回填 clerk_id
+          - "merged"         Clerk 用户已有行：小抄 / ingest 记录迁过去，删除匿名行
+          - "already_linked" 匿名行已属于该 Clerk 用户（重复调用）
+          - "conflict"       匿名行已被其他 Clerk 用户认领
+          - "not_found"      没有该 anon_id 的行（从未保存过数据，或已合并删除）
+        """
+        users = self.client.table("users")
+        anon_rows = users.select("id, clerk_id").eq("anon_id", anon_id).limit(1).execute().data
+        if not anon_rows:
+            return "not_found"
+        anon = anon_rows[0]
+        if anon["clerk_id"] == clerk_id:
+            return "already_linked"
+        if anon["clerk_id"]:
+            return "conflict"
+
+        clerk_rows = users.select("id").eq("clerk_id", clerk_id).limit(1).execute().data
+        if not clerk_rows:
+            # is_("clerk_id", "null")：并发认领时只有一个请求能写入
+            claimed = (
+                users.update({"clerk_id": clerk_id})
+                .eq("id", anon["id"])
+                .is_("clerk_id", "null")
+                .execute()
+                .data
+            )
+            return "linked" if claimed else "conflict"
+
+        target_id = clerk_rows[0]["id"]
+        for table in ("cheat_sheets", "ingest_batches"):
+            self.client.table(table).update({"user_id": target_id}).eq(
+                "user_id", anon["id"]
+            ).execute()
+        users.delete().eq("id", anon["id"]).is_("clerk_id", "null").execute()
+        return "merged"
 
     # ── cheat_sheets ─────────────────────────────────────────────────────────
 

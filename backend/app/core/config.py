@@ -29,6 +29,21 @@ class Settings:
     # Cohere Rerank
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
 
+    # Clerk 鉴权（Phase 2）：验证插件 / webapp 发来的 session token
+    CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY", "")
+    # 可选：Dashboard → API Keys → JWT public key（PEM）。配置后验签不再请求 JWKS
+    CLERK_JWT_KEY: str = os.getenv("CLERK_JWT_KEY", "").replace("\\n", "\n")
+    # token 的 azp（签发来源）白名单，逗号分隔：webapp 源 + chrome-extension://<扩展 ID>
+    CLERK_AUTHORIZED_PARTIES: list[str] = [
+        p.strip()
+        for p in os.getenv("CLERK_AUTHORIZED_PARTIES", "http://localhost:3000").split(",")
+        if p.strip()
+    ]
+    # 允许调用 POST /api/rag/clear（清空所有用户向量数据）的 Clerk user id，逗号分隔；为空则禁用
+    ADMIN_USER_IDS: list[str] = [
+        p.strip() for p in os.getenv("ADMIN_USER_IDS", "").split(",") if p.strip()
+    ]
+
     # RAG 检索重试配置（处理向量索引最终一致性延迟）
     RAG_RETRY_ATTEMPTS: int = int(os.getenv("RAG_RETRY_ATTEMPTS", "6"))
     RAG_RETRY_DELAY_SECONDS: int = int(os.getenv("RAG_RETRY_DELAY_SECONDS", "2"))

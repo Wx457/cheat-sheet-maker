@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from app.api import generate as generate_api
 from app.schemas import ExamType, OutlineResponse
 
+from conftest import bearer
+
 
 class DummyService:
     def __init__(self):
@@ -27,7 +29,7 @@ def test_generate_outline_returns_topics_with_user_id_and_batch(monkeypatch):
 
     response = client.post(
         "/api/outline",
-        headers={"X-User-ID": "user-42"},
+        headers=bearer("user-42"),
         json={
             "raw_text": "linear algebra syllabus",
             "user_context": "Math 101",
@@ -54,7 +56,7 @@ def test_generate_outline_falls_back_to_user_context_as_query(monkeypatch):
 
     response = client.post(
         "/api/outline",
-        headers={"X-User-ID": "user-42"},
+        headers=bearer("user-42"),
         json={"user_context": "Math 101"},
     )
 

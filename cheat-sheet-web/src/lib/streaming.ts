@@ -9,6 +9,7 @@
  *  5. 根据事件类型调用对应回调：meta → onMeta，section → onSection，[DONE] → onDone
  */
 
+import { authHeaders, type TokenGetter } from '@/lib/api'
 import type { GenerateSheetRequest, StreamMetaEvent, StreamSectionEvent } from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -36,13 +37,13 @@ export interface StreamCallbacks {
  * 向 `/api/generate/stream` 发起 SSE 请求，解析每个事件并触发回调。
  *
  * @param payload   与后端 GenerateSheetRequest 对应的请求体
- * @param userId    用户 ID（放 X-User-ID header）
+ * @param getToken  Clerk useAuth().getToken（放 Authorization: Bearer）
  * @param callbacks SSE 事件回调集合
  * @param signal    AbortController.signal，用于取消流（可选）
  */
 export async function startStreaming(
   payload: GenerateSheetRequest,
-  userId: string,
+  getToken: TokenGetter,
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -54,7 +55,7 @@ export async function startStreaming(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-ID': userId,
+        ...(await authHeaders(getToken)),
       },
       body: JSON.stringify(payload),
       signal,

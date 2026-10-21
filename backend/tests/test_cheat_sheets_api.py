@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 from app.api import cheat_sheets as cheat_sheets_api
 
+from conftest import bearer
+
 SHEET_ID = "11111111-1111-4111-8111-111111111111"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat()
 
@@ -16,8 +18,8 @@ class FakeStore:
         self.users = {}
         self.sheets = {}
 
-    def get_or_create_user_id(self, anon_id):
-        return self.users.setdefault(anon_id, f"db-{anon_id}")
+    def get_or_create_user_id(self, clerk_id):
+        return self.users.setdefault(clerk_id, f"db-{clerk_id}")
 
     def create_cheat_sheet(self, user_id, title, sections):
         row = {
@@ -68,7 +70,7 @@ def test_create_strips_runtime_fields_and_returns_id(monkeypatch):
 
     response = client.post(
         "/api/cheat-sheets",
-        headers={"X-User-ID": "anon-1"},
+        headers=bearer("anon-1"),
         json={"title": "Linear Algebra", "sections": SECTIONS_FROM_WEBAPP},
     )
 
@@ -86,7 +88,7 @@ def test_create_accepts_item_type_outside_enum(monkeypatch):
 
     response = client.post(
         "/api/cheat-sheets",
-        headers={"X-User-ID": "anon-1"},
+        headers=bearer("anon-1"),
         json={
             "title": "",
             "sections": [{"title": "S", "items": [{"type": "example", "content": "x"}]}],
@@ -101,22 +103,16 @@ def test_get_and_update_are_scoped_to_owner(monkeypatch):
     client = create_client(monkeypatch, store)
     client.post(
         "/api/cheat-sheets",
-        headers={"X-User-ID": "anon-1"},
+        headers=bearer("anon-1"),
         json={"title": "Mine", "sections": []},
     )
 
-    assert (
-        client.get(f"/api/cheat-sheets/{SHEET_ID}", headers={"X-User-ID": "anon-1"}).status_code
-        == 200
-    )
-    assert (
-        client.get(f"/api/cheat-sheets/{SHEET_ID}", headers={"X-User-ID": "anon-2"}).status_code
-        == 404
-    )
+    assert client.get(f"/api/cheat-sheets/{SHEET_ID}", headers=bearer("anon-1")).status_code == 200
+    assert client.get(f"/api/cheat-sheets/{SHEET_ID}", headers=bearer("anon-2")).status_code == 404
 
     other = client.put(
         f"/api/cheat-sheets/{SHEET_ID}",
-        headers={"X-User-ID": "anon-2"},
+        headers=bearer("anon-2"),
         json={"title": "Hijacked", "sections": []},
     )
     assert other.status_code == 404
@@ -124,7 +120,7 @@ def test_get_and_update_are_scoped_to_owner(monkeypatch):
 
     mine = client.put(
         f"/api/cheat-sheets/{SHEET_ID}",
-        headers={"X-User-ID": "anon-1"},
+        headers=bearer("anon-1"),
         json={"title": "Renamed", "sections": []},
     )
     assert mine.status_code == 200
@@ -134,7 +130,7 @@ def test_get_and_update_are_scoped_to_owner(monkeypatch):
 def test_invalid_sheet_id_is_rejected(monkeypatch):
     client = create_client(monkeypatch, FakeStore())
 
-    response = client.get("/api/cheat-sheets/not-a-uuid", headers={"X-User-ID": "anon-1"})
+    response = client.get("/api/cheat-sheets/not-a-uuid", headers=bearer("anon-1"))
 
     assert response.status_code == 422
 
@@ -144,7 +140,7 @@ def test_returns_503_when_supabase_not_configured(monkeypatch):
 
     response = client.post(
         "/api/cheat-sheets",
-        headers={"X-User-ID": "anon-1"},
+        headers=bearer("anon-1"),
         json={"title": "x", "sections": []},
     )
 

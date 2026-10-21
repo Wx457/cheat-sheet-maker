@@ -15,6 +15,8 @@ from app.api.rag import router as rag_router
 from app.application.services.ingestion_service import IngestionService
 from app.infrastructure.rag.qdrant_store import QdrantVectorStore, QuotaExceededError
 
+from conftest import bearer
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -114,7 +116,7 @@ def test_ingest_text_returns_truncated_status():
         resp = create_client().post(
             "/api/rag/ingest",
             json={"text": "x" * 1000, "source": "test"},
-            headers={"X-User-ID": "user-1"},
+            headers=bearer("user-1"),
         )
 
     assert resp.status_code == 200
@@ -135,7 +137,7 @@ def test_ingest_text_returns_429_on_quota_exceeded():
         resp = create_client().post(
             "/api/rag/ingest",
             json={"text": "hello", "source": "test"},
-            headers={"X-User-ID": "user-1"},
+            headers=bearer("user-1"),
         )
 
     assert resp.status_code == 429
@@ -149,7 +151,7 @@ def test_ingest_file_returns_429_on_quota_exceeded():
         )
         resp = create_client().post(
             "/api/rag/ingest/file",
-            headers={"X-User-ID": "user-1"},
+            headers=bearer("user-1"),
             files={"file": ("test.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")},
         )
 

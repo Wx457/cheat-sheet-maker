@@ -332,6 +332,19 @@ class QdrantVectorStore:
         logger.info("Deleted %d chunks for user_id=%s", count, user_id)
         return count
 
+    def reassign_user(self, from_user_id: str, to_user_id: str) -> int:
+        """把 from_user_id 的全部 chunk 改归 to_user_id（匿名 → Clerk 用户合并）。返回迁移数。"""
+        count = self.get_user_chunk_count(from_user_id)
+        if count:
+            self.client.set_payload(
+                collection_name=_COLLECTION,
+                payload={"user_id": to_user_id},
+                key="metadata",
+                points=FilterSelector(filter=self._user_filter(from_user_id)),
+            )
+            logger.info("Reassigned %d chunks: %s -> %s", count, from_user_id, to_user_id)
+        return count
+
     def clear_vector_data(self) -> int:
         info = self.client.get_collection(_COLLECTION)
         total = info.points_count or 0

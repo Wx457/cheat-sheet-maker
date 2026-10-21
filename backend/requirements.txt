@@ -10,6 +10,9 @@ Jinja2==3.1.6  # 模板渲染
 # Database
 supabase==2.31.0  # Phase 3：用户 / 小抄历史 / ingest 记录（仅后端，secret key 访问）
 
+# Auth
+clerk-backend-api==7.0.0  # Phase 2：验证 Clerk session token（插件 / webapp 的 Authorization: Bearer）
+
 # Redis client（Phase 5 SSE 结果缓存将使用）
 redis==5.3.1
 hiredis==3.3.0

@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "AI Cheat Sheet Generator",
   "version": "1.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnKlz6fjVn7KvYXwMWE8zWcBqAhc9NN3iI2eAN1M1BDt9Eqw74dqfK2P4gXXE7cR9lSIU6xHjv/Py2s7fqX9JVCgnqyOsj7ZtvwZ5NO6d63ZKwxza2u5k9YPQtQrZMi+CjQN5gylSvDi+px290qNvJoH+CPU119iodGjNX9NVFWATYae+FwhwQBmFqAGmJDBMXM9ZvQ/ZGcConsx8bTkyrzeDXTRei764D6bV8Vi79qSJvqWzww3Xv0VzCHRkI3dwE/HK+km/VFIFGe3gvXe4Kn5JcCySqLJubRwPOFb/3CdfJqsP5tVW6D3yz+Up1AM/NV1xJLg+WiqgABRwgVL/qQIDAQAB",
   "description": "Instantly turn GPT chats, text, and PDFs into beautiful, exam-ready cheat sheets with AI.",
   "permissions": [
     "activeTab",

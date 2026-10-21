@@ -46,3 +46,7 @@ UPGRADE_PLAN.md
 .claude/settings.local.json
 REPO.md
 CLAUDE.md
+.claudeignore
+
+.claude/
+.cursor/

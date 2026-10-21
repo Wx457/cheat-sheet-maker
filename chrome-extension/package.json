@@ -1,0 +1,15 @@
+{
+  "name": "cheat-sheet-maker-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/background.js --bundle --format=esm --target=chrome120 --external:/clerk-config.js --outfile=dist/background.js",
+    "watch": "npm run build -- --watch"
+  },
+  "dependencies": {
+    "@clerk/chrome-extension": "3.1.91"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
