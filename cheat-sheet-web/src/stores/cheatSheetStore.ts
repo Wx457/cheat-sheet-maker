@@ -2,6 +2,7 @@
 
 import { create } from 'zustand'
 import type { UISection, ContentItem, CheatSheetRecord } from '@/types'
+import { DEFAULT_PRESET, type FontSizeSetting, type PresetId } from '@/lib/sheetLayout'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State shape
@@ -31,9 +32,17 @@ interface CheatSheetState {
    */
   savedSnapshot: SavedSnapshot | null
 
+  // ── 排版设置（Phase 7；用户偏好，reset 不清空，暂不随小抄保存） ──────────
+  presetId: PresetId
+  fontSize: FontSizeSetting
+
   // ── 流式状态 ────────────────────────────────────────────────────────────
   status: StreamStatus
   error: string | null
+
+  // ── 排版 actions ────────────────────────────────────────────────────────
+  setPresetId: (id: PresetId) => void
+  setFontSize: (size: FontSizeSetting) => void
 
   // ── 持久化 actions（由 editor page 调用） ───────────────────────────────
   setSheetId: (id: string | null) => void
@@ -86,8 +95,15 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   sections: [],
   sheetId: null,
   savedSnapshot: null,
+  presetId: DEFAULT_PRESET,
+  fontSize: 'auto',
   status: 'idle',
   error: null,
+
+  // ── 排版 ──────────────────────────────────────────────────────────────────
+  setPresetId: (presetId) => set({ presetId }),
+
+  setFontSize: (fontSize) => set({ fontSize }),
 
   // ── 持久化 ────────────────────────────────────────────────────────────────
   setSheetId: (sheetId) => set({ sheetId }),

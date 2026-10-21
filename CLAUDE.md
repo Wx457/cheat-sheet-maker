@@ -108,15 +108,16 @@ cheat-sheet-maker/
 │       ├── app/
 │       │   ├── layout.tsx                ✅
 │       │   ├── （无根 page.tsx）         ✅ "/" → /editor 由 next.config.ts redirects() 处理
-│       │   └── editor/page.tsx           🔨 已有：sheetId 恢复 / 自动保存（Phase 3 ✅）；待做：Phase 7 格式预设、Phase 2 Clerk 接入
+│       │   └── editor/page.tsx           🔨 已有：sheetId 恢复 / 自动保存（Phase 3 ✅）、分页画布（Phase 7 ✅）；待做：Phase 2 Clerk 接入
 │       ├── components/
-│       │   ├── CheatSheetCard.tsx        🔨 Phase 7 KaTeX 查看/编辑双态
-│       │   ├── CardList.tsx              ✅ DnD Kit 拖拽列表
+│       │   ├── SheetCanvas.tsx           ✅ 分页画布：离屏测量 → 装箱 → A4 纸页；自动缩字号；dnd-kit 拖拽（Phase 7）
+│       │   ├── SheetBlocks.tsx           ✅ 纸面上的标题 / item 块：KaTeX 查看/编辑双态（原 CheatSheetCard.tsx；CardList.tsx 已删除）
 │       │   └── StreamingStatus.tsx       ✅
 │       ├── lib/
+│       │   ├── sheetLayout.ts            ✅ 格式预设、纸页几何、packSections 装箱算法（Phase 7）
 │       │   ├── api.ts                    ✅ 含 /api/cheat-sheets 的 create / update / load、ApiError
 │       │   └── streaming.ts              ✅
-│       ├── stores/cheatSheetStore.ts     ✅ 含 sheetId / savedSnapshot / loadSheet（Phase 3 ✅）；
+│       ├── stores/cheatSheetStore.ts     ✅ 含 sheetId / savedSnapshot / loadSheet（Phase 3 ✅）、presetId / fontSize（Phase 7）；
 │       │                                    可选：Phase 6-6 persist 兜底首次保存前的状态
 │       └── types/index.ts               ✅
 │
@@ -146,7 +147,7 @@ cheat-sheet-maker/
 |-------|------|------|
 | 6 | SSE 流式渲染 | ✅ 2026-10-20 修复：生产者线程不再阻塞到生成结束，section 逐个推送 |
 | 6-6 | 刷新丢失卡片状态（zustand persist） | 🟡 生成完成后的刷新已由 Phase 3 解决；生成中 / 首次保存前的兜底可选 |
-| 7 | KaTeX 渲染 + 格式预设（多栏/字号/纸张） | 🟡 7-1 KaTeX 查看/编辑双态已完成；7-2~7-4 预设/多栏/字号待做 |
+| 7 | KaTeX 渲染 + 格式预设（多栏/字号/纸张） | ✅ 2026-10-21：所见即所得分页画布（A4 纵向双栏默认）、3 个预设、按 page_limit 自动缩字号；预设暂不随小抄保存 |
 | 1 | Qdrant 替换 MongoDB Vector Search + Cohere Rerank | ✅ 2026-10-20：Qdrant 版本已对齐（server v1.19.2 / client 1.19.1）；MongoDB 整体退役（vector_store、auth、plugin、健康检查、pymongo 均已移除） |
 | 清理 | 移除 ARQ/worker、pdf/、storage/、static/、frontend/、AWS 配置及依赖 | 🟡 已移除 ARQ/worker/task.py、pdf/、plugin.py、MongoDB；剩余：static/ 及其挂载、frontend/、空的 storage/、boto3/playwright 依赖与 Dockerfile 里的 playwright install、AWS_*/PDF_GENERATION_HOST 配置 |
 | 3 | Supabase 持久化（用户/小抄历史） | ✅ 2026-10-20：后端 supabase_store.py、/api/cheat-sheets CRUD、ingest_batches 同步；前端生成后自动保存、URL sheetId 刷新恢复、编辑防抖 PUT（3-4-c 浏览器端流程待手动验证） |

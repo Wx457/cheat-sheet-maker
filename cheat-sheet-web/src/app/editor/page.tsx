@@ -15,7 +15,7 @@
  *     → ③ URL 无 sheetId：自动触发 POST /api/generate/stream（SSE）
  *        URL 有 sheetId：GET /api/cheat-sheets/{id} 恢复，不重新生成（3-4-c）
  *     → ④ 生成完成后自动保存（POST），把 sheetId 写回 URL（replaceState，不重新渲染路由）
- *     → ⑤ 用户拖拽 / 编辑 → 防抖 PUT；导出 PDF
+ *     → ⑤ 用户拖拽 / 编辑 → 防抖 PUT；导出 PDF（SheetCanvas 分页画布，屏幕即打印版面）
  *     → ⑥ 生成中 / 有未保存修改时刷新：beforeunload 警告（6-4）
  *
  * 页面状态机：
@@ -38,7 +38,7 @@ import {
   storeAuthToken,
   updateCheatSheet,
 } from '@/lib/api'
-import CardList from '@/components/CardList'
+import SheetCanvas from '@/components/SheetCanvas'
 import StreamingStatus from '@/components/StreamingStatus'
 import type {
   GenerateSheetRequest,
@@ -473,7 +473,7 @@ function EditorContent() {
 
   // ── 正常编辑器界面 ─────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col min-h-screen bg-zinc-50 dark:bg-zinc-950">
+    <div className="print-block flex flex-col min-h-screen bg-zinc-200 dark:bg-zinc-950">
 
       {/* ══ HEADER ════════════════════════════════════════════════════════════ */}
       <header className="no-print sticky top-0 z-20 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border-b border-zinc-200 dark:border-zinc-800">
@@ -518,7 +518,9 @@ function EditorContent() {
 
           {/* Export PDF */}
           <button onClick={handleExportPDF} disabled={!canExport}
-            title={canExport ? 'Export as PDF' : 'Generate a cheat sheet first'}
+            title={canExport
+              ? 'Export as PDF — keep print scale at Default / 100%'
+              : 'Generate a cheat sheet first'}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors">
             <DownloadIcon />
             Export PDF
@@ -528,29 +530,16 @@ function EditorContent() {
       </header>
 
       {/* ══ MAIN ══════════════════════════════════════════════════════════════ */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-6 py-6">
-
-          {/* 错误信息块 */}
-          {status === 'error' && error && (
-            <div className="mb-6 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-              <strong>Failed: </strong>{error}
-            </div>
-          )}
-
-          {/* 小抄标题（cards 上方，收到 meta 后出现） */}
-          {metaTitle && (
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-50 mb-6 print:text-base print:mb-3">
-              {metaTitle}
-            </h1>
-          )}
-
-          {/* print-area：@media print 变两栏（见 globals.css） */}
-          <div className="print-area">
-            <CardList />
+      <main className="print-block flex-1">
+        {/* 错误信息块 */}
+        {status === 'error' && error && (
+          <div className="no-print max-w-[210mm] mx-auto mt-6 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+            <strong>Failed: </strong>{error}
           </div>
+        )}
 
-        </div>
+        {/* 分页画布：小抄标题画在第 1 页；打印即屏幕所见（见 SheetCanvas / globals.css） */}
+        <SheetCanvas title={metaTitle} pageLimit={pageLimit} />
       </main>
 
     </div>

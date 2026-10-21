@@ -25,23 +25,177 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── 小抄纸页（Phase 7：所见即所得） ─────────────────────────────────────── */
+/* 屏幕、打印、离屏测量层共用这些类；尺寸由 SheetCanvas 写入的 CSS 变量驱动    */
+/* （--page-w / --page-h / --page-pad / --cols / --col-gap / --font-size）。     */
+/* 装箱算法依赖：每个块 display: flow-root（KaTeX 的 margin 不向外塌陷），     */
+/* 间距只来自 .sheet-item 的 padding 和 .sheet-gap-before 的 margin。         */
+
+.sheet {
+  --item-gap: 0.3em;
+  --section-gap: 0.7em;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-size: var(--font-size);
+  line-height: 1.3;
+  color: #111;
+}
+
+.sheet .katex { font-size: 1.05em; }
+.sheet .katex-display { margin: 0.15em 0; overflow: hidden; }
+
+.sheet-title {
+  display: flow-root;
+  padding-bottom: 0.6em;
+  font-size: 1.5em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sheet-section-title {
+  display: flow-root;
+  position: relative;
+  padding-bottom: 0.25em;
+}
+.sheet-section-title-text {
+  font-size: 1.1em;
+  font-weight: 700;
+  border-bottom: 0.75pt solid #333;
+  padding-bottom: 0.1em;
+}
+
+.sheet-item {
+  display: flow-root;
+  padding-bottom: var(--item-gap);
+  overflow-wrap: anywhere;
+}
+
+.sheet-fragment { display: flow-root; position: relative; }
+.sheet-gap-before { margin-top: var(--section-gap); }
+
+/* 编辑态 textarea：字体 / 行高与查看态一致 */
+.sheet-editor {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+  background: #eff6ff;
+  outline: 1px solid #60a5fa;
+  outline-offset: 1px;
+}
+
+.sheet-placeholder { color: #a1a1aa; font-style: italic; }
+
+/* 离屏测量层：高度为 0 且不可见，打印时也不产生额外页 */
+.sheet-measurer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.sheet-measure-full { width: calc(var(--page-w) - 2 * var(--page-pad)); }
+.sheet-measure-gap { height: var(--section-gap); }
+.sheet-measure-col {
+  width: calc((var(--page-w) - 2 * var(--page-pad) - (var(--cols) - 1) * var(--col-gap)) / var(--cols));
+}
+
+/* 纸页 */
+.sheet-pages { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.sheet-page {
+  box-sizing: border-box;
+  width: var(--page-w);
+  height: var(--page-h);
+  padding: var(--page-pad);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+.sheet-columns {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  column-gap: var(--col-gap);
+  align-items: start;
+}
+.sheet-column { min-width: 0; }
+
+@media screen {
+  .sheet-canvas {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 16px 48px;
+  }
+  .sheet-page {
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.12), 0 4px 16px rgb(0 0 0 / 0.08);
+  }
+  .sheet-page-over { outline: 2px solid #ef4444; }
+  .sheet-page-label {
+    padding: 6px 0 16px;
+    text-align: center;
+    font-size: 11px;
+    color: #71717a;
+  }
+
+  /* 编辑提示：只用 outline / 背景，不占布局空间 */
+  .sheet-interactive { cursor: text; border-radius: 2px; }
+  .sheet-interactive:hover { outline: 1px dashed #93c5fd; outline-offset: 1px; }
+  .sheet-dragging { opacity: 0.4; }
+
+  .sheet-drag-handle {
+    position: absolute;
+    left: -14px;
+    top: 0.15em;
+    padding: 1px;
+    color: #a1a1aa;
+    cursor: grab;
+    touch-action: none;
+  }
+  .sheet-drag-handle:hover { color: #3f3f46; }
+  .sheet-drag-handle:active { cursor: grabbing; }
+  .sheet-delete {
+    position: absolute;
+    right: 0;
+    top: 0;
+    padding: 2px;
+    border-radius: 3px;
+    background: #fff;
+    color: #a1a1aa;
+    transition: opacity 0.15s;
+  }
+  .sheet-delete:hover { color: #ef4444; background: #fef2f2; }
+
+  .sheet-drop-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #3b82f6;
+    border-radius: 1px;
+  }
+  .sheet-drop-before { top: -2px; }
+  .sheet-drop-after { bottom: -2px; }
+}
+
 /* ── Print / PDF Export ───────────────────────────────────────────────────── */
-/* 使用方式：点击"Export PDF"按钮触发 window.print()，                        */
-/* 浏览器弹出打印对话框，选择"保存为 PDF"即可。                                 */
+/* 点击 "Export PDF" → window.print() → 浏览器另存为 PDF。                     */
+/* 纸页本身就是打印版面：这里只隐藏控件、去掉屏幕装饰，不改任何排版。         */
+/* @page（size / margin: 0）由 SheetCanvas 按预设注入。                        */
 
 @media print {
-  /* 1. 隐藏所有标记了 no-print 的 UI 元素（侧边栏、顶栏按钮、拖拽手柄等）*/
   .no-print {
     display: none !important;
   }
 
-  /* 2. 页面设置：A4 横向，边距压缩 */
-  @page {
-    size: A4 landscape;
-    margin: 1cm 1.5cm;
-  }
-
-  /* 3. 背景与颜色重置，确保黑白打印清晰 */
   *,
   *::before,
   *::after {
@@ -52,59 +206,31 @@ body {
   html,
   body {
     background: white !important;
-    color: black !important;
-    font-size: 10px;
+    display: block !important;
     height: auto !important;
+    min-height: 0 !important;
     overflow: visible !important;
   }
 
-  /* 4. 打印区：两栏布局（CSS columns） */
-  .print-area {
-    column-count: 2;
-    column-gap: 1cm;
-    /* 重置 flex/overflow 布局，让 columns 正常工作 */
+  /* 页面外层容器：不参与布局（flex / min-h-screen / 背景色都会影响分页） */
+  .print-block {
     display: block !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: none !important;
   }
 
-  /* 5. 每张卡片：不跨栏断页 */
-  .print-card {
-    break-inside: avoid;
-    page-break-inside: avoid;
-    margin-bottom: 0.5cm;
-    box-shadow: none !important;
-    border: 1px solid #d1d5db !important;
-    border-radius: 4px !important;
-    padding: 8px 10px !important;
+  .sheet-page {
+    /* 略小于纸张高度，防子像素取整多出一张空白页（只裁掉页边距内的空白） */
+    height: calc(var(--page-h) - 0.5mm);
+    break-after: page;
+  }
+  .sheet-page-wrap:last-child .sheet-page {
+    break-after: auto;
   }
 
-  /* 6. 卡片标题 */
-  .print-card input[type="text"] {
-    font-size: 10px !important;
-    font-weight: 700 !important;
-    color: black !important;
-  }
-
-  /* 7. 内容行（textarea = 编辑态，.item-content = 渲染态） */
-  .print-card textarea,
-  .print-card .item-content {
-    font-size: 9px !important;
-    line-height: 1.4 !important;
-    color: black !important;
-  }
-
-  /* 8. equation 行不跨栏断行，避免 KaTeX 被截断 */
-  .print-card .item-equation {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-
-  /* 9. KaTeX 公式字号随页面缩小 */
-  .print-card .katex {
-    font-size: 1em !important;
-  }
-
-  /* 10. streaming indicator 不需要打印 */
-  .print-card [class*="animate-"] {
-    display: none !important;
+  .sheet-placeholder {
+    visibility: hidden;
   }
 }
