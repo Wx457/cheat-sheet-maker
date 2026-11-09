@@ -1,6 +1,7 @@
 # Web Framework
 fastapi==0.128.0
 uvicorn==0.40.0
+watchfiles==1.3.0  # uvicorn --reload 热重载（docker-compose.override.yml）
 starlette==0.50.0
 jiter==0.12.0
 orjson==3.11.5
@@ -40,12 +41,8 @@ langchain-core==1.2.5
 langchain-text-splitters==1.1.0
 numpy==2.2.6  # 向量计算
 
-# PDF Processing
-playwright==1.57.0
+# PDF Processing（解析上传的 PDF）
 pypdf==6.5.0
-
-# AWS S3 Storage
-boto3==1.35.0
 
 # BM25 keyword search (fallback retrieval)
 rank-bm25==0.2.2

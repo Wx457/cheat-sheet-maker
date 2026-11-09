@@ -30,6 +30,13 @@ Chrome extension for Cheat Sheet Maker that enables knowledge base building thro
 
 ### Installation
 
+0. Build the service worker first (it bundles Clerk; Chrome loads `dist/background.js`):
+   ```bash
+   cd chrome-extension
+   cp clerk-config.example.js clerk-config.js   # then fill in the Clerk publishable key
+   npm install
+   npm run build                                 # re-run after every change to src/background.js
+   ```
 1. Open Chrome browser
 2. Navigate to `chrome://extensions/`
 3. Enable "Developer mode" (toggle in top right corner)

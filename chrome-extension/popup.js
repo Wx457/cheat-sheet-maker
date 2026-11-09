@@ -43,38 +43,104 @@ function estimateChunks(charCount) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// User ID 管理（每次安装生成一次，存入 chrome.storage.local）
+// Auth（Clerk session 由 service worker 持有，popup 通过消息拿 token；登录只发生在 webapp）
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function getOrCreateUserId() {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(['user_id'], (result) => {
-      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return }
+class NotSignedInError extends Error {
+  constructor() {
+    super('Please sign in first.')
+    this.name = 'NotSignedInError'
+  }
+}
 
-      if (result.user_id) {
-        resolve(result.user_id)
-      } else {
-        const newId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-          const r = Math.random() * 16 | 0
-          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
-        })
-        chrome.storage.local.set({ user_id: newId }, () => {
-          if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return }
-          resolve(newId)
-        })
-      }
-    })
-  })
+async function sendAuthMessage(type) {
+  const res = await chrome.runtime.sendMessage({ type })
+  if (!res?.ok) throw new Error(`Auth unavailable: ${res?.error || 'no response from service worker'}`)
+  return res.data
+}
+
+async function getAuthToken() {
+  const token = await sendAuthMessage('auth:getToken')
+  if (!token) throw new NotSignedInError()
+  return token
 }
 
 async function getHeaders() {
-  const userId = await getOrCreateUserId()
-  return { 'Content-Type': 'application/json', 'X-User-ID': userId }
+  const token = await getAuthToken()
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
 }
 
 async function getHeadersForFile() {
-  const userId = await getOrCreateUserId()
-  return { 'X-User-ID': userId }
+  const token = await getAuthToken()
+  return { 'Authorization': `Bearer ${token}` }
+}
+
+function renderAuthBar(user) {
+  const status = document.getElementById('authStatus')
+  const signInBtn = document.getElementById('btnSignIn')
+  if (status) status.textContent = user ? (user.email || 'Signed in') : 'Not signed in'
+  if (signInBtn) signInBtn.style.display = user ? 'none' : ''
+}
+
+function openSignIn() {
+  const WEBAPP_URL = window.WEBAPP_URL || 'http://localhost:3000'
+  chrome.tabs.create({ url: `${WEBAPP_URL}/sign-in` })
+}
+
+// 401 / NotSignedInError 的统一出口：登录引导，而不是通用错误
+function handleNotSignedIn() {
+  renderAuthBar(null)
+  showNotice('Please sign in on the web app first (click "Sign in" at the top).', 'warning', 6000)
+}
+
+// Phase 2 之前的匿名数据：旧 user_id（插件生成的匿名 UUID）只读不再生成，登录后并入 Clerk 账号一次
+async function linkAnonIfNeeded(user) {
+  const { user_id: anonId, anon_linked_for: linkedFor } =
+    await chrome.storage.local.get(['user_id', 'anon_linked_for'])
+  if (!anonId || linkedFor === user.userId) return
+
+  const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/link-anon`, {
+      method: 'POST', headers: await getHeaders(), body: JSON.stringify({ anon_id: anonId }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      await chrome.storage.local.set({ anon_linked_for: user.userId })
+      if (data.chunks_moved > 0) {
+        showNotice(`Moved ${data.chunks_moved} chunks from before sign-in into your account.`, 'success', 5000)
+      }
+    } else if (res.status === 409) {
+      await chrome.storage.local.set({ anon_linked_for: user.userId })
+      showNotice('Data saved before sign-in already belongs to another account; it was not moved.', 'warning', 7000)
+    }
+    // 其他错误：不记录，下次打开再试
+  } catch (err) {
+    console.warn('[Auth] link-anon failed, will retry next time:', err)
+  }
+}
+
+// popup 打开 / 回到可见时调用；并发调用合并为一次
+let authRefreshPromise = null
+
+function refreshAuthState() {
+  if (!authRefreshPromise) {
+    authRefreshPromise = (async () => {
+      let user = null
+      try {
+        user = await sendAuthMessage('auth:getUser')
+      } catch (err) {
+        renderAuthBar(null)
+        showNotice(err.message || String(err), 'error', 7000)
+        return
+      }
+      renderAuthBar(user)
+      if (!user) return
+      await linkAnonIfNeeded(user)
+      await syncChunkCountFromServer()
+    })().finally(() => { authRefreshPromise = null })
+  }
+  return authRefreshPromise
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -201,6 +267,12 @@ async function parseErrorMessage(response, fallbackMessage) {
   if (detail?.message) return detail.message
   if (errorData.message) return errorData.message
   return fallback
+}
+
+async function ensureOk(response, fallbackMessage) {
+  if (response.ok) return
+  if (response.status === 401) throw new NotSignedInError()
+  throw new Error(await parseErrorMessage(response, fallbackMessage))
 }
 
 function handleIngestResponse(data, button, idleLabel) {
@@ -330,7 +402,9 @@ async function syncChunkCountFromServer() {
   try {
     const headers = await getHeaders()
     const res = await fetch(`${API_BASE_URL}/api/rag/chunks/count`, { method: 'GET', headers })
-    if (res.ok) {
+    if (res.status === 401) {
+      renderAuthBar(null)
+    } else if (res.ok) {
       const data = await res.json()
       if (data.status === 'success' && typeof data.chunks_count === 'number') {
         chunkCount = data.chunks_count
@@ -342,7 +416,8 @@ async function syncChunkCountFromServer() {
     } else {
       showNotice('Could not sync chunk count — showing local cache.', 'info', 4000)
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof NotSignedInError) { renderAuthBar(null); return }
     showNotice('Backend unreachable — showing local cache.', 'info', 4000)
   }
 }
@@ -502,12 +577,13 @@ async function handleNextToOutline() {
     const res = await fetch(`${API_BASE_URL}/api/outline`, {
       method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
     })
-    if (!res.ok) throw new Error(await parseErrorMessage(res, 'Outline request failed'))
+    await ensureOk(res, 'Outline request failed')
     const outline = await res.json()   // OutlineResponse: { topics: [{title, relevance_score}], degraded_reason? }
     outlineTopics = (outline.topics || []).map(t => ({ title: t.title, checked: true }))
     showOutlineContent()
   } catch (err) {
     if (err.name === 'AbortError') return   // user went back to the form page
+    if (err instanceof NotSignedInError) { showFormPage(); handleNotSignedIn(); return }
     showOutlineError(err.message || 'Outline generation failed.')
   } finally {
     if (outlineAbort === controller) outlineAbort = null
@@ -528,11 +604,10 @@ async function handleOpenEditorFromOutline() {
 
   const WEBAPP_URL = window.WEBAPP_URL || 'http://localhost:3000'
   const formData = collectFormData()
-  const userId = await getOrCreateUserId()
 
+  // 身份完全来自 webapp 的 Clerk session，URL 里不再带 userId
   const params = new URLSearchParams()
-  params.set('userId',    userId)
-  params.set('level',     LEVEL_MAP[formData.educationLevel] || 'undergraduate')
+  params.set('level',    LEVEL_MAP[formData.educationLevel] || 'undergraduate')
   params.set('pageLimit', PAGE_MAP[formData.pageLimit]       || '1_page')
   params.set('archetype', formData.archetype)
   params.set('topics',    JSON.stringify(checkedTopics))
@@ -577,7 +652,7 @@ async function handleResetKnowledgeBase() {
     const headers = await getHeaders()
     // DELETE /api/rag/chunks — 用户级操作，只删当前用户的向量数据
     const res = await fetch(`${API_BASE_URL}/api/rag/chunks`, { method: 'DELETE', headers })
-    if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to clear'))
+    await ensureOk(res, 'Failed to clear')
 
     chunkCount = 0
     lastIngestBatchId = null
@@ -589,6 +664,7 @@ async function handleResetKnowledgeBase() {
     updateLaunchButton()
     showNotice('Knowledge base cleared!', 'success', 2200)
   } catch (err) {
+    if (err instanceof NotSignedInError) { handleNotSignedIn(); return }
     showNotice(`Clear failed: ${err.message || err}`, 'error', 7000)
   } finally {
     btn.disabled = false
@@ -656,11 +732,12 @@ async function handleScanPage() {
       method: 'POST', headers,
       body: JSON.stringify({ text, source: sourceName }),
     })
-    if (!res.ok) throw new Error(await parseErrorMessage(res, 'Save failed'))
+    await ensureOk(res, 'Save failed')
     handleIngestResponse(await res.json(), btn, 'Scan & Add to KB')
   } catch (err) {
-    showNotice(`Scan failed: ${err.message || err}`, 'error', 7000)
     setIngestButtonState(btn, 'idle', 'Scan & Add to KB')
+    if (err instanceof NotSignedInError) { handleNotSignedIn(); return }
+    showNotice(`Scan failed: ${err.message || err}`, 'error', 7000)
   }
 }
 
@@ -689,12 +766,13 @@ async function handleSaveText() {
       method: 'POST', headers,
       body: JSON.stringify({ text, source: sourceName }),
     })
-    if (!res.ok) throw new Error(await parseErrorMessage(res, 'Save failed'))
+    await ensureOk(res, 'Save failed')
     handleIngestResponse(await res.json(), btn, 'Save & Add to KB')
     textInput.value = ''
   } catch (err) {
-    showNotice(`Save failed: ${err.message || err}`, 'error', 7000)
     setIngestButtonState(btn, 'idle', 'Save & Add to KB')
+    if (err instanceof NotSignedInError) { handleNotSignedIn(); return }
+    showNotice(`Save failed: ${err.message || err}`, 'error', 7000)
   }
 }
 
@@ -717,12 +795,13 @@ async function handleUploadPdf() {
     const formData = new FormData()
     formData.append('file', file)
     const res = await fetch(`${API_BASE_URL}/api/rag/ingest/file`, { method: 'POST', headers, body: formData })
-    if (!res.ok) throw new Error(await parseErrorMessage(res, 'Upload failed'))
+    await ensureOk(res, 'Upload failed')
     handleIngestResponse(await res.json(), btn, 'Upload PDF & Add to KB')
     fileInput.value = ''
   } catch (err) {
-    showNotice(`Upload failed: ${err.message || err}`, 'error', 7000)
     setIngestButtonState(btn, 'idle', 'Upload PDF & Add to KB')
+    if (err instanceof NotSignedInError) { handleNotSignedIn(); return }
+    showNotice(`Upload failed: ${err.message || err}`, 'error', 7000)
   }
 }
 
@@ -784,7 +863,13 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('change', buildHeaderSummary)
   })
 
-  // Restore state from local storage, then sync from server
+  // Auth bar：在 webapp 登录后切回 side panel 时重新查询登录态
+  document.getElementById('btnSignIn')?.addEventListener('click', openSignIn)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshAuthState()
+  })
+
+  // Restore state from local storage, then check auth (link-anon + sync from server)
   chrome.storage.local.get(
     ['chunk_count', 'last_ingest_batch_id', 'last_ingest_at'],
     async (result) => {
@@ -795,7 +880,7 @@ document.addEventListener('DOMContentLoaded', () => {
       lastIngestBatchId = result?.last_ingest_batch_id || null
       lastIngestAt = result?.last_ingest_at || null
 
-      await syncChunkCountFromServer()
+      await refreshAuthState()
     }
   )
 

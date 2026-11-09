@@ -7,7 +7,8 @@
   "permissions": [
     "activeTab",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "cookies"
   ],
   "action": {
     "default_icon": {
@@ -21,7 +22,8 @@
     "default_path": "popup.html"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "dist/background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
@@ -33,7 +35,8 @@
     "http://18.189.87.197:8000/*",
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*",
-    "http://localhost:3000/*"
+    "http://localhost:3000/*",
+    "https://pleasing-basilisk-2860.clerk.accounts.dev/*"
   ]
 }
 
