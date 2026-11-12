@@ -1,10 +1,7 @@
 import asyncio
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from qdrant_client import QdrantClient
 
 from app.api import generate_router
@@ -28,32 +25,6 @@ app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(cheat_sheets_router, tags=["CheatSheets"])
 app.include_router(auth_router, tags=["Auth"])
 
-
-# 挂载静态文件（前端构建产物）
-# 注意：static 目录应该在 Dockerfile 构建时从 frontend/dist 复制过来
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    # 挂载根目录，用于访问 index.html
-    app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
-
-    # 3. 👇 新增：根路径路由 (这就是我们要加的！)
-    @app.get("/")
-    async def read_root():
-        # 直接读取并返回 index.html 文件
-        return FileResponse(static_dir / "index.html")
-
-    # 挂载 assets 目录，用于访问 JS/CSS 等资源文件
-    # Vite 构建的 HTML 中资源路径是 /assets/xxx，所以需要单独挂载
-    assets_dir = static_dir / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-        print(f"✅ Assets directory mounted: {assets_dir}")
-
-    print(f"✅ Static files mounted: {static_dir}")
-else:
-    print(
-        f"⚠️ Warning: Static files directory does not exist: {static_dir}, PDF generation may not work properly"
-    )
 
 
 @app.get("/health")

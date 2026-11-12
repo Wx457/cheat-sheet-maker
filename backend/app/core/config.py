@@ -64,20 +64,6 @@ class Settings:
     MAX_CHUNKS_PER_USER: int = int(os.getenv("MAX_CHUNKS_PER_USER", "500"))
     MAX_CHUNKS_PER_INGEST: int = int(os.getenv("MAX_CHUNKS_PER_INGEST", "200"))
 
-    # AWS S3 配置
-    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
-    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-    AWS_REGION: str = os.getenv(
-        "AWS_REGION", "us-east-1"
-    )  # 默认 us-east-1，建议在 .env 中设置为实际使用的区域（如 us-east-2）
-    S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "cheat-sheets")
-
-    # PDF 生成配置
-    # ========== [上线检查] localhost 作为默认值 - 生产环境应通过环境变量 PDF_GENERATION_HOST 配置（例如: http://backend:8000 或生产环境地址） ==========
-    PDF_GENERATION_HOST: str = os.getenv(
-        "PDF_GENERATION_HOST", "http://localhost:8000"
-    )  # Worker 进程访问 FastAPI 服务器的地址
-
 
 # 创建全局配置实例
 settings = Settings()

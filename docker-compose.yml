@@ -34,7 +34,6 @@ services:
       - REDIS_PORT=6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - PDF_GENERATION_HOST=http://backend:8000
       - PYTHONDONTWRITEBYTECODE=1
     env_file:
       - ./backend/.env
