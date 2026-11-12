@@ -13,6 +13,10 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import logging
+import time
 from typing import Annotated
 
 from clerk_backend_api.security import authenticate_request_async
@@ -20,6 +24,28 @@ from clerk_backend_api.security.types import AuthenticateRequestOptions
 from fastapi import Depends, HTTPException, Request
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _unverified_claims(request: Request) -> dict:
+    """仅用于日志：不验签地解出 token 的 azp / iat / nbf / exp，帮助定位 401 原因。"""
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return {"token": "missing"}
+    try:
+        payload = auth.split(" ", 1)[1].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except Exception:  # noqa: BLE001 - 日志辅助，解析失败不影响鉴权结果
+        return {"token": "unparseable"}
+    now = int(time.time())
+    return {
+        "azp": claims.get("azp"),
+        "sid": str(claims.get("sid", ""))[-6:],
+        "iat-now": (claims["iat"] - now) if "iat" in claims else None,
+        "nbf-now": (claims["nbf"] - now) if "nbf" in claims else None,
+        "exp-now": (claims["exp"] - now) if "exp" in claims else None,
+    }
 
 
 async def get_current_user_id(request: Request) -> str:
@@ -41,6 +67,10 @@ async def get_current_user_id(request: Request) -> str:
     )
     user_id = (state.payload or {}).get("sub") if state.is_signed_in else None
     if not user_id:
+        logger.warning(
+            "auth rejected %s %s: reason=%s message=%s claims=%s",
+            request.method, request.url.path, state.reason, state.message, _unverified_claims(request),
+        )
         raise HTTPException(
             status_code=401,
             detail=f"未登录或登录已失效: {state.message or 'invalid session token'}",

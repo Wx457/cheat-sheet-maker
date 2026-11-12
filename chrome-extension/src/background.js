@@ -21,6 +21,10 @@ chrome.action.onClicked.addListener((tab) => {
 // The service worker can be killed at any time, so never assume this survives between messages —
 // always go through getClerk(). A background client only reads the webapp session (syncHost cookie)
 // when it loads, so `fresh` rebuilds it after the user signs in / out on the webapp.
+//
+// The syncHost cookies live on the cookie domain "localhost" (no port). Chrome checks cookie access
+// against that portless URL, so manifest host_permissions needs "http://localhost/*" — the
+// "http://localhost:3000/*" entry alone makes chrome.cookies return nothing (see REPO.md §6).
 let clerkPromise = null
 
 function getClerk({ fresh = false } = {}) {
@@ -37,11 +41,29 @@ function getClerk({ fresh = false } = {}) {
   return clerkPromise
 }
 
+function tokenHasAzp(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return Boolean(JSON.parse(atob(payload)).azp)
+  } catch {
+    return false
+  }
+}
+
 async function fetchToken(clerk) {
   if (!clerk.session) return null
   try {
-    return (await clerk.session.getToken()) || null
-  } catch {
+    let token = await clerk.session.getToken()
+    // A freshly loaded client starts from the session's last_active_token. Right after an OAuth
+    // sign-in on the webapp that token was minted server-side (no Origin), so it has no `azp` and the
+    // backend's authorized_parties check rejects it until it expires (~60s). Mint one from here instead:
+    // its azp is chrome-extension://<id>. See REPO.md §7.
+    if (token && !tokenHasAzp(token)) {
+      token = await clerk.session.getToken({ skipCache: true })
+    }
+    return token || null
+  } catch (err) {
+    console.warn('[Clerk] getToken failed, treating as signed out:', err)
     return null   // session revoked / signed out on the webapp
   }
 }
@@ -59,6 +81,11 @@ async function getSession() {
 }
 
 const handlers = {
+  // popup 点了 Sign out：丢掉缓存的 client，下次查询必定重新读 cookie + 问 Clerk
+  'auth:reset': async () => {
+    clerkPromise = null
+    return null
+  },
   'auth:getToken': async () => (await getSession()).token,
   'auth:getUser': async () => {
     const { clerk, token } = await getSession()

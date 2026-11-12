@@ -78,13 +78,24 @@ async function getHeadersForFile() {
 function renderAuthBar(user) {
   const status = document.getElementById('authStatus')
   const signInBtn = document.getElementById('btnSignIn')
+  const signOutBtn = document.getElementById('btnSignOut')
   if (status) status.textContent = user ? (user.email || 'Signed in') : 'Not signed in'
   if (signInBtn) signInBtn.style.display = user ? 'none' : ''
+  if (signOutBtn) signOutBtn.style.display = user ? '' : 'none'
 }
 
 function openSignIn() {
   const WEBAPP_URL = window.WEBAPP_URL || 'http://localhost:3000'
   chrome.tabs.create({ url: `${WEBAPP_URL}/sign-in` })
+}
+
+// 登出也在 webapp 完成（/sign-out 打开即登出）。本地立即切到未登录，并让 service worker 丢掉缓存的
+// Clerk client —— 否则它手里的 session token 还能用约 60 秒，回到 panel 时会误显示仍已登录
+function openSignOut() {
+  const WEBAPP_URL = window.WEBAPP_URL || 'http://localhost:3000'
+  chrome.tabs.create({ url: `${WEBAPP_URL}/sign-out` })
+  renderAuthBar(null)
+  chrome.runtime.sendMessage({ type: 'auth:reset' }).catch(() => {})
 }
 
 // 401 / NotSignedInError 的统一出口：登录引导，而不是通用错误
@@ -865,6 +876,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Auth bar：在 webapp 登录后切回 side panel 时重新查询登录态
   document.getElementById('btnSignIn')?.addEventListener('click', openSignIn)
+  document.getElementById('btnSignOut')?.addEventListener('click', openSignOut)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshAuthState()
   })
