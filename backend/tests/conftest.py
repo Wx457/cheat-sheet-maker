@@ -16,6 +16,9 @@ from clerk_backend_api.security.types import (  # noqa: E402
 
 from app.core import auth as auth_module  # noqa: E402
 from app.core.config import settings  # noqa: E402
+from app.infrastructure.cache import redis_cache  # noqa: E402
+
+from fake_redis import FakeRedis  # noqa: E402
 
 
 def pytest_configure(config):
@@ -27,6 +30,14 @@ def pytest_configure(config):
 def bearer(user_id: str) -> dict:
     """测试用请求头：fake_clerk 把 `Bearer test:<user_id>` 解析为已登录的 user_id。"""
     return {"Authorization": f"Bearer test:{user_id}"}
+
+
+@pytest.fixture(autouse=True)
+def fake_cache(monkeypatch):
+    """所有测试都用内存版 Redis：不碰真实 Redis（容器里能连上，CI 里没有）。"""
+    cache = redis_cache.CheatSheetCache(FakeRedis(), ttl_seconds=3600)
+    monkeypatch.setattr(redis_cache, "_cache", cache)
+    return cache
 
 
 @pytest.fixture(autouse=True)

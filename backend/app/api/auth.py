@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.application.services.account_service import AccountService
 from app.core.auth import CurrentUserId
+from app.infrastructure.cache.redis_cache import get_cheat_sheet_cache
 
 router = APIRouter()
 
@@ -37,4 +38,7 @@ async def link_anon(
         raise HTTPException(status_code=500, detail=f"关联匿名数据时发生错误: {str(e)}")
     if result["status"] == "conflict":
         raise HTTPException(status_code=409, detail="该匿名数据已关联到其他账号")
+    if result["chunks_moved"] > 0:
+        # 知识库多了迁移进来的 chunk → 该用户的生成结果缓存作废（Phase 5）
+        await get_cheat_sheet_cache().invalidate_user(user_id)
     return LinkAnonResponse(**result)

@@ -17,6 +17,8 @@ class Settings:
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+    # Phase 5：SSE 生成结果缓存的保留时间（秒）；0 = 关闭缓存
+    CHEATSHEET_CACHE_TTL_SECONDS: int = int(os.getenv("CHEATSHEET_CACHE_TTL_SECONDS", str(24 * 3600)))
 
     # Qdrant vector store
     QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")

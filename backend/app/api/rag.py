@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from app.application.services.ingestion_service import IngestionService
 from app.core.auth import CurrentUserId, require_admin
+from app.infrastructure.cache.redis_cache import get_cheat_sheet_cache
 from app.infrastructure.rag.qdrant_store import QuotaExceededError
 
 router = APIRouter()
@@ -115,6 +116,9 @@ async def ingest_text(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"文本摄入时发生错误: {str(e)}")
+    finally:
+        # 知识库可能已变化（含部分写入后失败）→ 该用户的生成结果缓存作废（Phase 5）
+        await get_cheat_sheet_cache().invalidate_user(user_id)
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -182,6 +186,8 @@ async def ingest_file(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"文件摄入时发生错误: {str(e)}")
+    finally:
+        await get_cheat_sheet_cache().invalidate_user(user_id)
 
 
 @router.delete("/chunks", response_model=ClearResponse)
@@ -201,6 +207,8 @@ async def delete_user_chunks(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"删除用户知识库时发生错误: {str(e)}")
+    finally:
+        await get_cheat_sheet_cache().invalidate_user(user_id)
 
 
 @router.post("/clear", response_model=ClearResponse, dependencies=[Depends(require_admin)])
@@ -213,6 +221,7 @@ async def clear_vector_data() -> ClearResponse:
     try:
         ingestion = IngestionService.default()
         deleted_count = ingestion.rag_service.clear_vector_data()
+        await get_cheat_sheet_cache().invalidate_all()
 
         return ClearResponse(status="success", deleted_count=deleted_count)
     except Exception as e:

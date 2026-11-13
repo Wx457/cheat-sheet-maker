@@ -98,6 +98,8 @@ class GenerateSheetRequest(BaseModel):
     )
     archetype: Optional[CourseArchetype] = None
     exam_type: ExamType = ExamType.final
+    # Phase 5：跳过结果缓存、强制重新生成（新结果会覆盖缓存）。不参与缓存键
+    no_cache: bool = False
 
 
 class PluginAnalyzeRequest(BaseModel):
