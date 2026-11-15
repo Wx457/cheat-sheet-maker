@@ -31,6 +31,8 @@ interface CheatSheetState {
    * 与当前 metaTitle / sections 做引用比较判断是否有未保存修改（每次编辑都会生成新数组）。
    */
   savedSnapshot: SavedSnapshot | null
+  /** 当前内容是从本标签页的未保存草稿恢复的（6-6）；保存成功 / reset / 从后端加载后清除 */
+  restoredFromDraft: boolean
 
   // ── 排版设置（Phase 7；用户偏好，reset 不清空，暂不随小抄保存） ──────────
   presetId: PresetId
@@ -49,6 +51,11 @@ interface CheatSheetState {
   markSaved: (snapshot: SavedSnapshot) => void
   /** 用后端记录填充 store（刷新恢复），status → complete，并以此为已保存基线 */
   loadSheet: (record: CheatSheetRecord) => void
+  /**
+   * 用本标签页的未保存草稿填充 store（6-6 缺口 2）。savedSnapshot 置空 → isDirty，
+   * 自动保存会继续重试（sheetId 为空则 POST，否则 PUT）
+   */
+  restoreDraft: (draft: { title: string; sections: Pick<UISection, 'title' | 'items'>[]; sheetId: string | null }) => void
 
   // ── 流式写入 actions（由 streaming.ts 调用） ────────────────────────────
   setStatus: (status: StreamStatus) => void
@@ -95,6 +102,7 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   sections: [],
   sheetId: null,
   savedSnapshot: null,
+  restoredFromDraft: false,
   presetId: DEFAULT_PRESET,
   fontSize: 'auto',
   status: 'idle',
@@ -108,7 +116,7 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   // ── 持久化 ────────────────────────────────────────────────────────────────
   setSheetId: (sheetId) => set({ sheetId }),
 
-  markSaved: (savedSnapshot) => set({ savedSnapshot }),
+  markSaved: (savedSnapshot) => set({ savedSnapshot, restoredFromDraft: false }),
 
   loadSheet: (record) => {
     const sections: UISection[] = record.sections.map((s) => ({
@@ -123,10 +131,27 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
       sections,
       // 恢复的内容即已保存内容，避免恢复后立刻触发一次无意义的 PUT
       savedSnapshot: { title: record.title, sections },
+      restoredFromDraft: false,
       status: 'complete',
       error: null,
     })
   },
+
+  restoreDraft: (draft) =>
+    set({
+      sheetId: draft.sheetId,
+      metaTitle: draft.title,
+      sections: draft.sections.map((s) => ({
+        title: s.title,
+        items: s.items,
+        id: nextId(),
+        isStreaming: false,
+      })),
+      savedSnapshot: null,
+      restoredFromDraft: true,
+      status: 'complete',
+      error: null,
+    }),
 
   // ── 流式写入 ──────────────────────────────────────────────────────────────
   setStatus: (status) => set({ status }),
@@ -185,6 +210,7 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
       sections: [],
       sheetId: null,
       savedSnapshot: null,
+      restoredFromDraft: false,
       status: 'idle',
       error: null,
     }),

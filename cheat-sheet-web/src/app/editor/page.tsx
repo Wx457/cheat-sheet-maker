@@ -37,6 +37,7 @@ import {
   loadCheatSheet,
   updateCheatSheet,
 } from '@/lib/api'
+import { clearDraft, draftMatches, draftScopeFromSearch, readDraft, writeDraft } from '@/lib/draftStorage'
 import SheetCanvas from '@/components/SheetCanvas'
 import StreamingStatus from '@/components/StreamingStatus'
 import type {
@@ -187,7 +188,6 @@ function DevSimulatorPanel() {
               <option value="stem_computational">STEM Computational</option>
               <option value="stem_theoretical">STEM Theoretical</option>
               <option value="coding">Coding / CS</option>
-              <option value="humanities">Humanities</option>
               <option value="general">General</option>
             </select>
           </div>
@@ -264,9 +264,12 @@ function EditorContent() {
   const sheetIdParam    = searchParams.get('sheetId')   // 3-4-c：已保存的小抄 id
   // 插件打开时带 topics；刷新恢复带 sheetId；Dev 模拟面板带 launch
   const hasPluginParams = !!(topicsParam || sheetIdParam || searchParams.get('launch'))
+  // 6-6：本标签页草稿的归属（插件参数，不含 sheetId）
+  const searchString = searchParams.toString()
+  const draftScope   = useMemo(() => draftScopeFromSearch(searchString), [searchString])
 
   // ── Clerk（Phase 2）：后端请求用 session token 鉴权 ──────────────────────────
-  const { isLoaded: authLoaded, getToken } = useAuth()
+  const { isLoaded: authLoaded, getToken, userId } = useAuth()
 
   // ── Zustand store ──────────────────────────────────────────────────────────
   const status              = useCheatSheetStore((s) => s.status)
@@ -282,6 +285,9 @@ function EditorContent() {
   const loadSheet           = useCheatSheetStore((s) => s.loadSheet)
   const savedSnapshot       = useCheatSheetStore((s) => s.savedSnapshot)
   const markSaved           = useCheatSheetStore((s) => s.markSaved)
+  const restoreDraft        = useCheatSheetStore((s) => s.restoreDraft)
+  const sheetId             = useCheatSheetStore((s) => s.sheetId)
+  const restoredFromDraft   = useCheatSheetStore((s) => s.restoredFromDraft)
 
   // ── 持久化状态（3-4-c） ────────────────────────────────────────────────────
   const [saving, setSaving]               = useState(false)
@@ -399,6 +405,23 @@ function EditorContent() {
     return () => clearTimeout(timer)
   }, [isDirty, sections, metaTitle, persist])
 
+  // ── 6-6：未保存的修改同步写进本标签页草稿；保存成功后删除 ──────────────────────
+  useEffect(() => {
+    if (!userId || status !== 'complete') return
+    if (isDirty) {
+      writeDraft({
+        scope: draftScope,
+        userId,
+        sheetId,
+        title: metaTitle,
+        sections: sections.map(({ title, items }) => ({ title, items })),
+        savedAt: Date.now(),
+      })
+    } else if (savedSnapshot !== null) {
+      clearDraft()
+    }
+  }, [isDirty, status, sections, metaTitle, sheetId, savedSnapshot, draftScope, userId])
+
   // ── 自动触发（有插件参数时） ────────────────────────────────────────────────
   useEffect(() => {
     if (!hasPluginParams) return
@@ -408,6 +431,14 @@ function EditorContent() {
 
     startedRef.current = true
     reset()
+
+    // 6-6：本标签页有对得上的未保存草稿 → 直接恢复，不再生成 / 加载；自动保存会继续重试
+    const draft = userId ? readDraft() : null
+    if (draft && userId && draftMatches(draft, draftScope, sheetIdParam, userId)) {
+      restoreDraft(draft)
+      return
+    }
+
     if (sheetIdParam) runLoad(sheetIdParam)
     else runStreaming()
 
@@ -438,6 +469,7 @@ function EditorContent() {
     epochRef.current += 1
     loadFailureRef.current = null
     setSaveError(null)
+    clearDraft()   // 6-6：旧小抄的草稿不再适用
     reset()   // 同时清空 sheetId / savedSnapshot
     replaceSheetIdInUrl(null)
     runStreaming()
@@ -482,6 +514,13 @@ function EditorContent() {
           </span>
 
           <StreamingStatus />
+
+          {status === 'complete' && restoredFromDraft && (
+            <span className="text-xs text-amber-600 dark:text-amber-400 shrink-0"
+              title="Your last edits had not been saved before the page reloaded; they were restored from this tab and will be saved automatically.">
+              Restored unsaved edits
+            </span>
+          )}
 
           {status === 'complete' && (
             <SaveIndicator
