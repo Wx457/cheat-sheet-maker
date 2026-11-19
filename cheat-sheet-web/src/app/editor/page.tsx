@@ -13,8 +13,8 @@
  *     → ① 读取 URL 参数；身份来自 Clerk session（proxy.ts 保护 /editor，与插件共享同一 Clerk 用户）
  *     → ③ URL 无 sheetId：自动触发 POST /api/generate/stream（SSE）
  *        URL 有 sheetId：GET /api/cheat-sheets/{id} 恢复，不重新生成（3-4-c）
- *     → ④ 生成完成后自动保存（POST），把 sheetId 写回 URL（replaceState，不重新渲染路由）
- *     → ⑤ 用户拖拽 / 编辑 → 防抖 PUT；导出 PDF（SheetCanvas 分页画布，屏幕即打印版面）
+ *     → ④ 生成完成后自动保存（POST）为 courseId 课程内的新版本，把 sheetId 写回 URL（replaceState）
+ *     → ⑤ 用户拖拽 / 编辑 → 防抖 PUT（修改当前版本，不新建版本）；导出 PDF（SheetCanvas 分页画布）
  *     → ⑥ 生成中 / 有未保存修改时刷新：beforeunload 警告（6-4）
  *
  * 页面状态机：
@@ -27,6 +27,7 @@
  */
 
 import { Suspense, useEffect, useRef, useCallback, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { UserButton, useAuth } from '@clerk/nextjs'
 import { useCheatSheetStore } from '@/stores/cheatSheetStore'
@@ -34,6 +35,7 @@ import { startStreaming } from '@/lib/streaming'
 import {
   ApiError,
   createCheatSheet,
+  getCourse,
   loadCheatSheet,
   updateCheatSheet,
 } from '@/lib/api'
@@ -49,6 +51,7 @@ import type {
   TopicInput,
   UISection,
   CheatSheetSaveRequest,
+  CourseDetail,
 } from '@/types'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,6 +75,63 @@ function replaceSheetIdInUrl(id: string | null) {
   if (id) params.set('sheetId', id)
   else params.delete('sheetId')
   window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+}
+
+/**
+ * 第 8 点：顶栏的「课程名 · v3」+ 同课程版本切换。
+ * 课程 id 来自已保存 / 已加载的记录，首次保存前用插件传入的 courseId。
+ * reloadKey 变化（首次保存拿到版本号）时重新拉取版本列表。
+ */
+function CourseVersionBadge({ courseId, sheetId, version, reloadKey }: {
+  courseId: string | null
+  sheetId: string | null
+  version: number | null
+  reloadKey: string
+}) {
+  const { getToken } = useAuth()
+  const [loaded, setLoaded] = useState<{ key: string; detail: CourseDetail } | null>(null)
+  const requestKey = courseId ? `${courseId}|${reloadKey}` : null
+
+  useEffect(() => {
+    if (!courseId || !requestKey) return
+    const controller = new AbortController()
+    getCourse(courseId, getToken, controller.signal)
+      .then((detail) => setLoaded({ key: requestKey, detail }))
+      .catch(() => { /* 只是导航信息，失败时不显示 */ })
+    return () => controller.abort()
+  }, [courseId, requestKey, getToken])
+
+  const detail = loaded && loaded.key === requestKey ? loaded.detail : null
+  if (!courseId || !detail) return null
+  const currentVersion = version ?? detail.sheets.find((s) => s.id === sheetId)?.version ?? null
+
+  return (
+    <span className="flex items-center gap-1.5 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+      <Link href={`/courses?id=${encodeURIComponent(courseId)}`}
+        className="max-w-[12rem] truncate hover:text-zinc-900 dark:hover:text-zinc-100 hover:underline"
+        title="All versions of this course">
+        {detail.course.name}
+      </Link>
+      {detail.sheets.length > 1 && sheetId ? (
+        <select
+          aria-label="Switch version"
+          value={sheetId}
+          onChange={(e) => {
+            // 整页跳转而不是 router.push：编辑器的启动逻辑（恢复 / 生成）只在首次挂载时运行，
+            // 也不能按 sheetId 做 key 重挂载——首次保存会 replaceState 写入 sheetId，会把刚生成的内容重载一遍
+            // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+            window.location.assign(`/editor?sheetId=${encodeURIComponent(e.target.value)}`)
+          }}
+          className="rounded border border-zinc-200 dark:border-zinc-700 bg-transparent px-1 py-0.5 text-xs">
+          {detail.sheets.map((s) => (
+            <option key={s.id} value={s.id}>v{s.version}</option>
+          ))}
+        </select>
+      ) : currentVersion !== null ? (
+        <span>· v{currentVersion}</span>
+      ) : null}
+    </span>
+  )
 }
 
 function SaveIndicator({ saving, saveError, isDirty, everSaved }: {
@@ -231,6 +291,10 @@ function WaitingForPlugin() {
       <p className="text-xs text-zinc-400 dark:text-zinc-600">
         This page is meant to be opened by the extension, not directly.
       </p>
+      <Link href="/courses"
+        className="text-sm font-medium text-zinc-700 dark:text-zinc-300 underline underline-offset-4 hover:text-zinc-900 dark:hover:text-zinc-100">
+        Browse your saved cheat sheets →
+      </Link>
       {isDev && <DevSimulatorPanel />}
     </div>
   )
@@ -262,6 +326,7 @@ function EditorContent() {
   }, [topicsParam])
 
   const sheetIdParam    = searchParams.get('sheetId')   // 3-4-c：已保存的小抄 id
+  const courseIdParam   = searchParams.get('courseId') ?? undefined   // 第 8 点：插件选中的课程
   // 插件打开时带 topics；刷新恢复带 sheetId；Dev 模拟面板带 launch
   const hasPluginParams = !!(topicsParam || sheetIdParam || searchParams.get('launch'))
   // 6-6：本标签页草稿的归属（插件参数，不含 sheetId）
@@ -281,12 +346,14 @@ function EditorContent() {
   const setError            = useCheatSheetStore((s) => s.setError)
   const setMetaTitle        = useCheatSheetStore((s) => s.setMetaTitle)
   const mergeOrAddSection   = useCheatSheetStore((s) => s.mergeOrAddSection)
-  const setSheetId          = useCheatSheetStore((s) => s.setSheetId)
+  const setSavedRecord      = useCheatSheetStore((s) => s.setSavedRecord)
   const loadSheet           = useCheatSheetStore((s) => s.loadSheet)
   const savedSnapshot       = useCheatSheetStore((s) => s.savedSnapshot)
   const markSaved           = useCheatSheetStore((s) => s.markSaved)
   const restoreDraft        = useCheatSheetStore((s) => s.restoreDraft)
   const sheetId             = useCheatSheetStore((s) => s.sheetId)
+  const sheetCourseId       = useCheatSheetStore((s) => s.courseId)
+  const sheetVersion        = useCheatSheetStore((s) => s.version)
   const restoredFromDraft   = useCheatSheetStore((s) => s.restoredFromDraft)
 
   // ── 持久化状态（3-4-c） ────────────────────────────────────────────────────
@@ -314,23 +381,25 @@ function EditorContent() {
       savedSnapshot.sections !== sections ||
       savedSnapshot.title !== metaTitle)
 
+  // 生成请求参数：既发给 SSE 端点，也随首次保存记为该版本的 generation_params（8-2 重新生成复用）
+  const generationPayload = useMemo<GenerateSheetRequest>(() => ({
+    user_context: context,
+    academic_level: level,
+    page_limit: pageLimit,
+    archetype,
+    exam_type: examType,
+    selected_topics: selectedTopics,
+    course_id: courseIdParam,
+  }), [context, level, pageLimit, archetype, examType, selectedTopics, courseIdParam])
+
   // ── SSE 流式生成（被 auto-trigger / Retry 调用） ─────────────────────────────
   const runStreaming = useCallback(async () => {
     const controller = new AbortController()
     abortRef.current = controller
     setStatus('connecting')
 
-    const payload: GenerateSheetRequest = {
-      user_context: context,
-      academic_level: level,
-      page_limit: pageLimit,
-      archetype,
-      exam_type: examType,
-      selected_topics: selectedTopics,
-    }
-
     await startStreaming(
-      payload,
+      generationPayload,
       getToken,
       {
         onMeta: (e) => { setMetaTitle(e.title); setStatus('streaming') },
@@ -342,10 +411,7 @@ function EditorContent() {
       },
       controller.signal,
     )
-  }, [
-    getToken, context, level, pageLimit, archetype, examType, selectedTopics,
-    setStatus, setError, setMetaTitle, mergeOrAddSection,
-  ])
+  }, [getToken, generationPayload, setStatus, setError, setMetaTitle, mergeOrAddSection])
 
   // ── 3-4-c：按 sheetId 恢复（刷新页面时不重新生成） ─────────────────────────
   const runLoad = useCallback(async (id: string) => {
@@ -368,7 +434,7 @@ function EditorContent() {
     }
   }, [getToken, setStatus, setError, loadSheet])
 
-  // ── 3-4-c：保存（首次 POST 并把 id 写回 URL，之后 PUT） ─────────────────────
+  // ── 3-4-c：保存（首次 POST = 课程内新版本，并把 id 写回 URL；之后 PUT 修改当前版本） ──
   const persist = useCallback(() => {
     const epoch = epochRef.current
     saveChainRef.current = saveChainRef.current.then(async () => {
@@ -380,10 +446,15 @@ function EditorContent() {
       try {
         const record = sheetId
           ? await updateCheatSheet(sheetId, body, getToken)
-          : await createCheatSheet(body, getToken)
+          : await createCheatSheet({
+              ...body,
+              course_id: courseIdParam,
+              generation_params: generationPayload,
+              origin: 'generate',
+            }, getToken)
         if (epoch !== epochRef.current) return
         if (!sheetId) {
-          setSheetId(record.id)
+          setSavedRecord(record)
           replaceSheetIdInUrl(record.id)
         }
         markSaved({ title, sections: current })
@@ -396,7 +467,7 @@ function EditorContent() {
         setSaving(false)
       }
     })
-  }, [getToken, setSheetId, markSaved])
+  }, [getToken, setSavedRecord, markSaved, courseIdParam, generationPayload])
 
   // 内容变化后防抖保存（生成完成时 isDirty 变为 true，也由此触发首次保存）
   useEffect(() => {
@@ -512,6 +583,13 @@ function EditorContent() {
           <span className="flex-1 text-sm text-zinc-500 dark:text-zinc-400 truncate min-w-0">
             {metaTitle || (isGenerating ? '…' : 'Ready')}
           </span>
+
+          <CourseVersionBadge
+            courseId={sheetCourseId ?? courseIdParam ?? null}
+            sheetId={sheetId}
+            version={sheetVersion}
+            reloadKey={`${sheetId ?? ''}|${sheetVersion ?? ''}`}
+          />
 
           <StreamingStatus />
 

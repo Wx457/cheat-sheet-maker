@@ -7,9 +7,10 @@
  *       webapp 负责 SSE 流式渲染 + 卡片编辑 + PDF 导出
  *
  * 插件只负责：
- *   1. 数据采集（Scan / Paste / PDF → POST /api/rag/ingest）
- *   2. 参数配置（level, archetype, pageLimit, examType）
- *   3. 打开 Webapp 编辑器页面（携带 URL 参数）
+ *   1. 选择 / 新建课程（第 8 点：知识库、小抄历史、表单默认值都按课程隔离）
+ *   2. 数据采集（Scan / Paste / PDF → POST /api/rag/ingest，带 course_id）
+ *   3. 参数配置（level, archetype, pageLimit, examType）
+ *   4. 打开 Webapp 编辑器页面（携带 URL 参数，含 courseId）
  */
 
 'use strict'
@@ -26,9 +27,15 @@ const MAX_CHUNKS_PER_USER = 500
 // 运行时状态
 // ─────────────────────────────────────────────────────────────────────────────
 
-let chunkCount = 0
+let chunkCount = 0          // 当前课程的 chunk 数
+let userChunkTotal = 0      // 该用户所有课程的 chunk 总数（配额按用户计）
 let lastIngestBatchId = null
 let lastIngestAt = null
+
+// Courses（第 8 点）
+let courses = []            // GET /api/courses：[{id, name, archetype, academic_level, is_default, ...}]
+let selectedCourseId = null // 持久化在 chrome.storage.local.selected_course_id
+const NEW_COURSE_OPTION = '__new__'
 
 // Outline page state
 let outlineTopics = []       // [{title: string, checked: boolean}]
@@ -146,12 +153,180 @@ function refreshAuthState() {
         return
       }
       renderAuthBar(user)
-      if (!user) return
+      if (!user) { renderCourseSelect(); return }
       await linkAnonIfNeeded(user)
+      await loadCourses()
       await syncChunkCountFromServer()
     })().finally(() => { authRefreshPromise = null })
   }
   return authRefreshPromise
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Courses（第 8 点 · 8-1）：选择已有课程 / 新建课程
+// 课程决定 ingest 写入哪个知识库、大纲 / 生成检索哪个知识库、小抄保存到哪门课；
+// 课程上的 archetype / academic_level 作为表单默认值，用户改表单时回写课程
+// ─────────────────────────────────────────────────────────────────────────────
+
+function selectedCourse() {
+  return courses.find(c => c.id === selectedCourseId) || null
+}
+
+function renderCourseSelect() {
+  const select = document.getElementById('courseSelect')
+  if (!select) return
+  select.innerHTML = ''
+  if (courses.length === 0) {
+    const opt = document.createElement('option')
+    opt.value = ''
+    opt.textContent = 'Sign in to load your courses'
+    select.appendChild(opt)
+    select.disabled = true
+    buildHeaderSummary()
+    return
+  }
+  for (const course of courses) {
+    const opt = document.createElement('option')
+    opt.value = course.id
+    opt.textContent = course.name
+    select.appendChild(opt)
+  }
+  const newOpt = document.createElement('option')
+  newOpt.value = NEW_COURSE_OPTION
+  newOpt.textContent = '＋ New course…'
+  select.appendChild(newOpt)
+  select.value = selectedCourseId || ''
+  select.disabled = false
+  buildHeaderSummary()
+}
+
+/** 课程上保存的默认值 → 表单（只填课程上有值的字段） */
+function applyCourseDefaults(course) {
+  if (!course) return
+  const levelLabel = Object.keys(LEVEL_MAP).find(k => LEVEL_MAP[k] === course.academic_level)
+  const radio = levelLabel && document.querySelector(`input[name="educationLevel"][value="${levelLabel}"]`)
+  if (radio) radio.checked = true
+  const archetypeSelect = document.getElementById('archetypeSelect')
+  if (archetypeSelect && course.archetype &&
+      [...archetypeSelect.options].some(o => o.value === course.archetype)) {
+    archetypeSelect.value = course.archetype
+  }
+}
+
+async function setSelectedCourse(courseId, { applyDefaults = true } = {}) {
+  selectedCourseId = courseId
+  chrome.storage.local.set({ selected_course_id: courseId }).catch(console.error)
+  renderCourseSelect()
+  if (applyDefaults) applyCourseDefaults(selectedCourse())
+}
+
+async function loadCourses() {
+  const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/courses`, { headers: await getHeaders() })
+    if (res.status === 401) { renderAuthBar(null); return }
+    await ensureOk(res, 'Could not load courses')
+    courses = await res.json()
+    const { selected_course_id: stored } = await chrome.storage.local.get('selected_course_id')
+    const keep = courses.find(c => c.id === (selectedCourseId || stored))
+    // 记住的课程已不存在（在 webapp 删掉了）→ 最近使用的课程（列表按最近使用排序）
+    await setSelectedCourse((keep || courses[0] || {}).id || null)
+  } catch (err) {
+    if (err instanceof NotSignedInError) { renderAuthBar(null); return }
+    courses = []
+    renderCourseSelect()
+    showNotice(`Could not load courses: ${err.message || err}`, 'warning', 6000)
+  }
+}
+
+function showNewCourseForm(show) {
+  const form = document.getElementById('newCourseForm')
+  if (form) form.style.display = show ? '' : 'none'
+  if (show) document.getElementById('newCourseName')?.focus()
+}
+
+async function handleCourseSelectChange(e) {
+  const value = e.target.value
+  if (value === NEW_COURSE_OPTION) {
+    e.target.value = selectedCourseId || ''   // 创建成功前保持原选择
+    showNewCourseForm(true)
+    return
+  }
+  showNewCourseForm(false)
+  await setSelectedCourse(value)
+  await syncChunkCountFromServer()
+}
+
+async function handleCreateCourse() {
+  const input = document.getElementById('newCourseName')
+  const btn = document.getElementById('btnCreateCourse')
+  const name = input?.value.trim().replace(/\s+/g, ' ')
+  if (!name) { showNotice('Please enter a course name.', 'warning', 3000); return }
+
+  const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
+  const formData = collectFormData()
+  if (btn) btn.disabled = true
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/courses`, {
+      method: 'POST',
+      headers: await getHeaders(),
+      body: JSON.stringify({
+        name,
+        archetype: formData.archetype,
+        academic_level: LEVEL_MAP[formData.educationLevel] || 'undergraduate',
+      }),
+    })
+    if (res.status === 409) {
+      // 同名课程已存在：直接选中它，而不是报错了事
+      const existing = courses.find(c => c.name.toLowerCase() === name.toLowerCase())
+      if (existing) {
+        showNewCourseForm(false)
+        await setSelectedCourse(existing.id)
+        await syncChunkCountFromServer()
+        showNotice(`"${existing.name}" already exists — selected it.`, 'info', 4000)
+        return
+      }
+    }
+    await ensureOk(res, 'Could not create course')
+    const course = await res.json()
+    courses = [course, ...courses]
+    if (input) input.value = ''
+    showNewCourseForm(false)
+    await setSelectedCourse(course.id, { applyDefaults: false })
+    await syncChunkCountFromServer()
+    showNotice(`Course "${course.name}" created.`, 'success', 2500)
+  } catch (err) {
+    if (err instanceof NotSignedInError) { handleNotSignedIn(); return }
+    showNotice(`Create failed: ${err.message || err}`, 'error', 6000)
+  } finally {
+    if (btn) btn.disabled = false
+  }
+}
+
+// 用户改了学习层次 / 课程类型 → 防抖回写为当前课程的默认值
+let courseDefaultsTimer = null
+function saveCourseDefaultsSoon() {
+  clearTimeout(courseDefaultsTimer)
+  courseDefaultsTimer = setTimeout(async () => {
+    const course = selectedCourse()
+    if (!course) return
+    const formData = collectFormData()
+    const patch = {}
+    const level = LEVEL_MAP[formData.educationLevel]
+    if (level && level !== course.academic_level) patch.academic_level = level
+    if (formData.archetype && formData.archetype !== course.archetype) patch.archetype = formData.archetype
+    if (Object.keys(patch).length === 0) return
+
+    const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/courses/${encodeURIComponent(course.id)}`, {
+        method: 'PATCH', headers: await getHeaders(), body: JSON.stringify(patch),
+      })
+      if (res.ok) Object.assign(course, await res.json())
+    } catch (err) {
+      console.warn('[Courses] could not save defaults:', err)   // 只是默认值，不打扰用户
+    }
+  }, 800)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -289,6 +464,7 @@ async function ensureOk(response, fallbackMessage) {
 function handleIngestResponse(data, button, idleLabel) {
   const accepted = Number(data.chunks_count || 0)
   chunkCount += accepted
+  userChunkTotal += accepted
   persistLastIngestInfo(data.ingest_batch_id, data.ingest_at)
   updateChunkCounter()
   persistChunkCount()
@@ -352,19 +528,26 @@ function updateLaunchButton() {
 let headerCollapsed = false
 
 function collectFormData() {
-  const courseName = document.getElementById('courseName')?.value.trim() || ''
+  const course = selectedCourse()
+  const courseId = course?.id || null
+  const courseName = course?.name || ''
   const educationLevel = document.querySelector('input[name="educationLevel"]:checked')?.value || 'Undergraduate'
   const examType = document.querySelector('input[name="examType"]:checked')?.value || 'Final'
   const pageLimit = document.querySelector('input[name="pageLimit"]:checked')?.value || '1 page'
   const archetype = document.getElementById('archetypeSelect')?.value || 'general'
-  return { courseName, educationLevel, examType, pageLimit, archetype }
+  return { courseId, courseName, educationLevel, examType, pageLimit, archetype }
+}
+
+/** 带上当前课程的 query string（没有课程时为空：后端按默认课程 / 全部数据处理） */
+function courseQuery() {
+  return selectedCourseId ? `?course_id=${encodeURIComponent(selectedCourseId)}` : ''
 }
 
 function buildHeaderSummary() {
   const el = document.getElementById('headerSummaryMain')
   if (!el) return
   const { courseName, examType, pageLimit } = collectFormData()
-  const title = courseName || 'Course not filled'
+  const title = courseName || 'No course selected'
   el.textContent = `${title} · ${examType} · ${pageLimit}`
 }
 
@@ -412,9 +595,23 @@ async function syncChunkCountFromServer() {
   const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
   try {
     const headers = await getHeaders()
-    const res = await fetch(`${API_BASE_URL}/api/rag/chunks/count`, { method: 'GET', headers })
+    const url = `${API_BASE_URL}/api/rag/chunks/count`
+    // 当前课程的数量（显示 / 能否打开编辑器）+ 用户总数（配额提示）
+    const [res, totalRes] = await Promise.all([
+      fetch(`${url}${courseQuery()}`, { method: 'GET', headers }),
+      fetch(url, { method: 'GET', headers }),
+    ])
+    if (totalRes.ok) {
+      const total = await totalRes.json()
+      if (typeof total.chunks_count === 'number') userChunkTotal = total.chunks_count
+    }
     if (res.status === 401) {
       renderAuthBar(null)
+    } else if (res.status === 404 && selectedCourseId) {
+      // 课程已在 webapp 删除 → 重新加载课程列表（会改选最近使用的课程）
+      selectedCourseId = null
+      await loadCourses()
+      if (selectedCourseId) await syncChunkCountFromServer()
     } else if (res.ok) {
       const data = await res.json()
       if (data.status === 'success' && typeof data.chunks_count === 'number') {
@@ -582,6 +779,7 @@ async function handleNextToOutline() {
       page_limit:     PAGE_MAP[formData.pageLimit]       || '1_page',
       archetype:      formData.archetype,
     }
+    if (formData.courseId)   body.course_id    = formData.courseId
     if (formData.courseName) body.user_context = formData.courseName
     if (formData.examType)   body.exam_type    = EXAM_MAP[formData.examType] || undefined
 
@@ -622,6 +820,7 @@ async function handleOpenEditorFromOutline() {
   params.set('pageLimit', PAGE_MAP[formData.pageLimit]       || '1_page')
   params.set('archetype', formData.archetype)
   params.set('topics',    JSON.stringify(checkedTopics))
+  if (formData.courseId)   params.set('courseId', formData.courseId)
   if (formData.courseName) params.set('context', formData.courseName)
   if (formData.examType)   params.set('examType', EXAM_MAP[formData.examType] || '')
 
@@ -651,9 +850,11 @@ async function handleResetKnowledgeBase() {
   if (!btn) return
   const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000'
 
+  const courseName = selectedCourse()?.name
   const confirmed = await showConfirmDialog(
-    'Clear knowledge base?',
-    'This will permanently delete all ingested content. This cannot be undone.',
+    courseName ? `Clear the knowledge base of "${courseName}"?` : 'Clear knowledge base?',
+    'This permanently deletes the content ingested into this course. ' +
+    'Saved cheat sheets are kept. This cannot be undone.',
     'Clear', 'Cancel'
   )
   if (!confirmed) return
@@ -661,10 +862,11 @@ async function handleResetKnowledgeBase() {
   btn.disabled = true
   try {
     const headers = await getHeaders()
-    // DELETE /api/rag/chunks — 用户级操作，只删当前用户的向量数据
-    const res = await fetch(`${API_BASE_URL}/api/rag/chunks`, { method: 'DELETE', headers })
+    // DELETE /api/rag/chunks?course_id= — 只删当前用户在该课程下的向量数据
+    const res = await fetch(`${API_BASE_URL}/api/rag/chunks${courseQuery()}`, { method: 'DELETE', headers })
     await ensureOk(res, 'Failed to clear')
 
+    userChunkTotal = Math.max(0, userChunkTotal - chunkCount)
     chunkCount = 0
     lastIngestBatchId = null
     lastIngestAt = null
@@ -733,15 +935,14 @@ async function handleScanPage() {
         'info', 8000
       )
     }
-    if (chunkCount + estChunks > MAX_CHUNKS_PER_USER) {
-      showNotice(`Knowledge base is near capacity (${chunkCount}/${MAX_CHUNKS_PER_USER}).`, 'info', 6000)
+    if (userChunkTotal + estChunks > MAX_CHUNKS_PER_USER) {
+      showNotice(`Knowledge base is near capacity (${userChunkTotal}/${MAX_CHUNKS_PER_USER} across all courses).`, 'info', 6000)
     }
 
     const headers = await getHeaders()
-    const sourceName = document.getElementById('courseName')?.value.trim() || title || url
     const res = await fetch(`${API_BASE_URL}/api/rag/ingest`, {
       method: 'POST', headers,
-      body: JSON.stringify({ text, source: sourceName }),
+      body: JSON.stringify({ text, source: title || url, course_id: selectedCourseId || undefined }),
     })
     await ensureOk(res, 'Save failed')
     handleIngestResponse(await res.json(), btn, 'Scan & Add to KB')
@@ -767,15 +968,14 @@ async function handleSaveText() {
     if (estChunks > MAX_CHUNKS_PER_INGEST) {
       showNotice(`Text is very large (~${estChunks} chunks). Only the first ${MAX_CHUNKS_PER_INGEST} will be saved.`, 'info', 8000)
     }
-    if (chunkCount + estChunks > MAX_CHUNKS_PER_USER) {
-      showNotice(`Knowledge base is near capacity (${chunkCount}/${MAX_CHUNKS_PER_USER}).`, 'info', 6000)
+    if (userChunkTotal + estChunks > MAX_CHUNKS_PER_USER) {
+      showNotice(`Knowledge base is near capacity (${userChunkTotal}/${MAX_CHUNKS_PER_USER} across all courses).`, 'info', 6000)
     }
 
     const headers = await getHeaders()
-    const sourceName = document.getElementById('courseName')?.value.trim() || 'User Paste'
     const res = await fetch(`${API_BASE_URL}/api/rag/ingest`, {
       method: 'POST', headers,
-      body: JSON.stringify({ text, source: sourceName }),
+      body: JSON.stringify({ text, source: 'User Paste', course_id: selectedCourseId || undefined }),
     })
     await ensureOk(res, 'Save failed')
     handleIngestResponse(await res.json(), btn, 'Save & Add to KB')
@@ -799,12 +999,13 @@ async function handleUploadPdf() {
 
   setIngestButtonState(btn, 'loading', 'Uploading…')
   try {
-    if (chunkCount >= MAX_CHUNKS_PER_USER) {
-      showNotice(`Knowledge base is full (${chunkCount}/${MAX_CHUNKS_PER_USER}). Clear some data first.`, 'info', 6000)
+    if (userChunkTotal >= MAX_CHUNKS_PER_USER) {
+      showNotice(`Knowledge base is full (${userChunkTotal}/${MAX_CHUNKS_PER_USER} across all courses). Clear some data first.`, 'info', 6000)
     }
     const headers = await getHeadersForFile()
     const formData = new FormData()
     formData.append('file', file)
+    if (selectedCourseId) formData.append('course_id', selectedCourseId)
     const res = await fetch(`${API_BASE_URL}/api/rag/ingest/file`, { method: 'POST', headers, body: formData })
     await ensureOk(res, 'Upload failed')
     handleIngestResponse(await res.json(), btn, 'Upload PDF & Add to KB')
@@ -862,14 +1063,26 @@ document.addEventListener('DOMContentLoaded', () => {
   // Header accordion
   document.getElementById('headerSummary')?.addEventListener('click', () => {
     setHeaderCollapsed(false)
-    document.getElementById('courseName')?.focus()
+    document.getElementById('courseSelect')?.focus()
   })
   document.getElementById('toggleHeaderBtn')?.addEventListener('click', () => {
     setHeaderCollapsed(!headerCollapsed)
   })
 
+  // Courses
+  document.getElementById('courseSelect')?.addEventListener('change', handleCourseSelectChange)
+  document.getElementById('btnCreateCourse')?.addEventListener('click', handleCreateCourse)
+  document.getElementById('btnCancelCourse')?.addEventListener('click', () => showNewCourseForm(false))
+  document.getElementById('newCourseName')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleCreateCourse() }
+    if (e.key === 'Escape') showNewCourseForm(false)
+  })
+  document.querySelectorAll('input[name="educationLevel"]').forEach(el => {
+    el.addEventListener('change', saveCourseDefaultsSoon)
+  })
+  document.getElementById('archetypeSelect')?.addEventListener('change', saveCourseDefaultsSoon)
+
   // Live summary update
-  document.getElementById('courseName')?.addEventListener('input', buildHeaderSummary)
   document.querySelectorAll('input[name="examType"], input[name="pageLimit"]').forEach(el => {
     el.addEventListener('change', buildHeaderSummary)
   })
@@ -883,12 +1096,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Restore state from local storage, then check auth (link-anon + sync from server)
   chrome.storage.local.get(
-    ['chunk_count', 'last_ingest_batch_id', 'last_ingest_at'],
+    ['chunk_count', 'last_ingest_batch_id', 'last_ingest_at', 'selected_course_id'],
     async (result) => {
       if (typeof result?.chunk_count === 'number') {
         chunkCount = result.chunk_count
         updateChunkCounter()
       }
+      selectedCourseId = result?.selected_course_id || null
       lastIngestBatchId = result?.last_ingest_batch_id || null
       lastIngestAt = result?.last_ingest_at || null
 

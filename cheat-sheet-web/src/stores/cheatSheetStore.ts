@@ -26,6 +26,8 @@ interface CheatSheetState {
   metaTitle: string           // 后端推送的 {"_type":"meta","title":"..."} 标题
   sections: UISection[]       // 所有 section（含前端 id 和 isStreaming 标志）
   sheetId: string | null      // 已保存到后端的小抄 id（首次保存前为 null）
+  courseId: string | null     // 第 8 点：小抄所属课程（保存 / 加载后已知）
+  version: number | null      // 第 8 点：课程内版本号（保存 / 加载后已知）
   /**
    * 最近一次成功保存（或从后端恢复）的内容，首次保存前为 null。
    * 与当前 metaTitle / sections 做引用比较判断是否有未保存修改（每次编辑都会生成新数组）。
@@ -48,6 +50,8 @@ interface CheatSheetState {
 
   // ── 持久化 actions（由 editor page 调用） ───────────────────────────────
   setSheetId: (id: string | null) => void
+  /** 首次保存（POST）成功：记下 id / 课程 / 版本号 */
+  setSavedRecord: (record: Pick<CheatSheetRecord, 'id' | 'course_id' | 'version'>) => void
   markSaved: (snapshot: SavedSnapshot) => void
   /** 用后端记录填充 store（刷新恢复），status → complete，并以此为已保存基线 */
   loadSheet: (record: CheatSheetRecord) => void
@@ -101,6 +105,8 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   metaTitle: '',
   sections: [],
   sheetId: null,
+  courseId: null,
+  version: null,
   savedSnapshot: null,
   restoredFromDraft: false,
   presetId: DEFAULT_PRESET,
@@ -116,6 +122,9 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
   // ── 持久化 ────────────────────────────────────────────────────────────────
   setSheetId: (sheetId) => set({ sheetId }),
 
+  setSavedRecord: (record) =>
+    set({ sheetId: record.id, courseId: record.course_id, version: record.version }),
+
   markSaved: (savedSnapshot) => set({ savedSnapshot, restoredFromDraft: false }),
 
   loadSheet: (record) => {
@@ -127,6 +136,8 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
     }))
     set({
       sheetId: record.id,
+      courseId: record.course_id,
+      version: record.version,
       metaTitle: record.title,
       sections,
       // 恢复的内容即已保存内容，避免恢复后立刻触发一次无意义的 PUT
@@ -209,6 +220,8 @@ export const useCheatSheetStore = create<CheatSheetState>((set) => ({
       metaTitle: '',
       sections: [],
       sheetId: null,
+      courseId: null,
+      version: null,
       savedSnapshot: null,
       restoredFromDraft: false,
       status: 'idle',

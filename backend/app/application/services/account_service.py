@@ -34,14 +34,24 @@ class AccountService:
         return cls(vectors=get_qdrant_store(), db=get_supabase_store())
 
     async def link_anon_data(self, anon_id: str, clerk_id: str) -> LinkResult:
-        """Supabase 先判定归属：匿名行已被其他 Clerk 用户认领（conflict）时不迁移 Qdrant chunk。"""
-        status = "not_found"
+        """Supabase 先判定归属：匿名行已被其他 Clerk 用户认领（conflict）时不迁移 Qdrant chunk。
+
+        第 8 点：匿名课程并入目标用户同名 / 默认课程时，chunk 的 course_id 跟着改写；
+        没有课程的旧 chunk 归入目标用户的默认课程，否则按课程检索时就看不到它们。
+        """
+        status, remap = "not_found", {}
         if self.db is not None:
-            status = await asyncio.to_thread(self.db.link_anon_user, anon_id, clerk_id)
+            status, remap = await asyncio.to_thread(self.db.link_anon_user, anon_id, clerk_id)
         if status == "conflict":
             return {"status": status, "chunks_moved": 0}
 
         # Qdrant 迁移后 anon_id 下不再有 chunk，重复调用 / 他人再认领只会迁移 0 条
         moved = await asyncio.to_thread(self.vectors.reassign_user, anon_id, clerk_id)
+        for from_course, to_course in remap.items():
+            await asyncio.to_thread(self.vectors.remap_course, clerk_id, from_course, to_course)
+        if moved and self.db is not None:
+            db_user_id = await asyncio.to_thread(self.db.get_or_create_user_id, clerk_id)
+            default = await asyncio.to_thread(self.db.get_or_create_default_course, db_user_id)
+            await asyncio.to_thread(self.vectors.assign_missing_course, clerk_id, default["id"])
         logger.info("Linked anon user: status=%s chunks_moved=%d", status, moved)
         return {"status": status, "chunks_moved": moved}

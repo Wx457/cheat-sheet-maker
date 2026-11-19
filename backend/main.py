@@ -8,6 +8,7 @@ from app.api import generate_router
 from app.api.rag import router as rag_router
 from app.api.cheat_sheets import router as cheat_sheets_router
 from app.api.auth import router as auth_router
+from app.api.courses import router as courses_router
 from app.core.config import settings
 
 app = FastAPI(title="Cheat Sheet Maker API")
@@ -24,6 +25,7 @@ app.include_router(generate_router)
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(cheat_sheets_router, tags=["CheatSheets"])
 app.include_router(auth_router, tags=["Auth"])
+app.include_router(courses_router, tags=["Courses"])
 
 
 

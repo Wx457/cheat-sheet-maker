@@ -70,6 +70,8 @@ export interface GenerateSheetRequest {
   selected_topics?: TopicInput[]
   archetype?: CourseArchetype
   exam_type?: ExamType
+  /** 第 8 点：只检索该课程的知识库；不传 → 默认课程 */
+  course_id?: string
 }
 
 // ── SSE event shapes（流式端点推送的 NDJSON 行） ───────────────────────────
@@ -93,10 +95,22 @@ export interface UISection extends Section {
 
 // ── 小抄持久化（/api/cheat-sheets，Supabase） ─────────────────────────────
 
-/** POST / PUT 请求体：只含 {title, items}，不含前端 id / isStreaming */
+/** PUT 请求体（手动编辑当前版本）：只含 {title, items}，不含前端 id / isStreaming */
 export interface CheatSheetSaveRequest {
   title: string
   sections: Section[]
+}
+
+export type SheetOrigin = 'generate' | 'regenerate'
+
+/** POST 请求体：一次生成 = 课程内一个新版本（第 8 点） */
+export interface CheatSheetCreateRequest extends CheatSheetSaveRequest {
+  /** 不传 → 默认课程「Uncategorized」 */
+  course_id?: string
+  /** 生成这一版所用的请求参数（8-2 重新生成复用） */
+  generation_params?: GenerateSheetRequest
+  origin?: SheetOrigin
+  parent_sheet_id?: string
 }
 
 /** 后端 CheatSheetRecord */
@@ -104,8 +118,49 @@ export interface CheatSheetRecord {
   id: string
   title: string
   sections: Section[]
+  course_id: string | null
+  version: number
+  origin: SheetOrigin
+  parent_sheet_id: string | null
+  generation_params: GenerateSheetRequest | null
   created_at: string
   updated_at: string
+}
+
+// ── 课程（/api/courses，第 8 点 · 8-1） ────────────────────────────────────
+
+export interface Course {
+  id: string
+  name: string
+  archetype: CourseArchetype | null
+  academic_level: AcademicLevel | null
+  /** 每个用户一门「Uncategorized」：未指定课程时的兜底 */
+  is_default: boolean
+  sheet_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CheatSheetSummary {
+  id: string
+  title: string
+  version: number
+  origin: SheetOrigin
+  parent_sheet_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CourseDetail {
+  course: Course
+  /** 按创建时间倒序 */
+  sheets: CheatSheetSummary[]
+}
+
+export interface CourseUpdateRequest {
+  name?: string
+  archetype?: CourseArchetype
+  academic_level?: AcademicLevel
 }
 
 // ── Outline ────────────────────────────────────────────────────────────────

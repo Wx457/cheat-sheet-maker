@@ -17,7 +17,10 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    IsEmptyCondition,
     MatchValue,
+    PayloadField,
+    PayloadSchemaType,
     PointStruct,
     ScoredPoint,
     VectorParams,
@@ -47,7 +50,12 @@ _VECTOR_SIZE = 1536  # text-embedding-3-small output dimension
 
 
 class QdrantVectorStore:
-    """Infra: Qdrant vector store（chunk 按 payload metadata.user_id 隔离）。"""
+    """Infra: Qdrant vector store。
+
+    chunk 按 payload metadata.user_id 隔离（Clerk user id）；第 8 点起再按 metadata.course_id
+    （Supabase courses.id）分课程。course_id 为 None 的查询覆盖该用户全部 chunk（未接 Supabase 的
+    本地开发 / 旧客户端）。配额（MAX_CHUNKS_PER_USER）始终按用户计。
+    """
 
     def __init__(self) -> None:
         self.client = QdrantClient(
@@ -67,11 +75,32 @@ class QdrantVectorStore:
                 collection_name=_COLLECTION,
                 vectors_config=VectorParams(size=_VECTOR_SIZE, distance=Distance.COSINE),
             )
+        # 过滤字段建 keyword 索引；已存在时 Qdrant 直接返回成功
+        for field in ("metadata.user_id", "metadata.course_id"):
+            try:
+                self.client.create_payload_index(
+                    collection_name=_COLLECTION,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception as exc:  # 索引只影响性能，不影响正确性
+                logger.warning("create_payload_index(%s) failed: %s", field, exc)
 
     @staticmethod
-    def _user_filter(user_id: str) -> Filter:
+    def _user_filter(user_id: str, course_id: Optional[str] = None) -> Filter:
+        must = [FieldCondition(key="metadata.user_id", match=MatchValue(value=user_id))]
+        if course_id:
+            must.append(FieldCondition(key="metadata.course_id", match=MatchValue(value=course_id)))
+        return Filter(must=must)
+
+    @staticmethod
+    def _missing_course_filter(user_id: str) -> Filter:
+        """该用户还没有 metadata.course_id 的 chunk（第 8 点之前写入的旧数据）。"""
         return Filter(
-            must=[FieldCondition(key="metadata.user_id", match=MatchValue(value=user_id))]
+            must=[
+                FieldCondition(key="metadata.user_id", match=MatchValue(value=user_id)),
+                IsEmptyCondition(is_empty=PayloadField(key="metadata.course_id")),
+            ]
         )
 
     @staticmethod
@@ -206,9 +235,13 @@ class QdrantVectorStore:
             with_vectors=with_vectors,
         ).points
 
-    async def search_context(self, query: str, user_id: str, k: int = 5) -> List[dict]:
+    async def search_context(
+        self, query: str, user_id: str, k: int = 5, course_id: Optional[str] = None
+    ) -> List[dict]:
         qvec = await asyncio.to_thread(self._embed_query, query)
-        hits = await asyncio.to_thread(self._vector_search, qvec, self._user_filter(user_id), k)
+        hits = await asyncio.to_thread(
+            self._vector_search, qvec, self._user_filter(user_id, course_id), k
+        )
         return [
             {
                 "content": h.payload.get("page_content", ""),
@@ -219,12 +252,21 @@ class QdrantVectorStore:
         ]
 
     async def search_context_mmr(
-        self, query: str, user_id: str, k: int = 3, fetch_k: int = 10
+        self,
+        query: str,
+        user_id: str,
+        k: int = 3,
+        fetch_k: int = 10,
+        course_id: Optional[str] = None,
     ) -> List[dict]:
         """Fetch fetch_k candidates then select k diverse results via greedy MMR."""
         qvec = await asyncio.to_thread(self._embed_query, query)
         candidates = await asyncio.to_thread(
-            self._vector_search, qvec, self._user_filter(user_id), fetch_k, with_vectors=True
+            self._vector_search,
+            qvec,
+            self._user_filter(user_id, course_id),
+            fetch_k,
+            with_vectors=True,
         )
         if not candidates:
             return []
@@ -281,14 +323,18 @@ class QdrantVectorStore:
     # ── management ────────────────────────────────────────────────────────────
 
     def find_chunks_by_user(
-        self, user_id: str, limit: int = 10, query: Optional[str] = None
+        self,
+        user_id: str,
+        limit: int = 10,
+        query: Optional[str] = None,
+        course_id: Optional[str] = None,
     ) -> List[dict]:
         """BM25 keyword fallback; scrolls all user chunks (quota max is 500)."""
         from rank_bm25 import BM25Okapi
 
         records, _ = self.client.scroll(
             collection_name=_COLLECTION,
-            scroll_filter=self._user_filter(user_id),
+            scroll_filter=self._user_filter(user_id, course_id),
             limit=settings.MAX_CHUNKS_PER_USER + 100,
             with_payload=True,
             with_vectors=False,
@@ -315,21 +361,44 @@ class QdrantVectorStore:
             for c, s in list(zip(contents, sources))[:limit]
         ]
 
-    def get_user_chunk_count(self, user_id: str) -> int:
-        result = self.client.count(
-            collection_name=_COLLECTION,
-            count_filter=self._user_filter(user_id),
-            exact=True,
-        )
-        return result.count
+    def get_user_chunk_count(self, user_id: str, course_id: Optional[str] = None) -> int:
+        """course_id 为 None 时是用户总数（配额用）；否则是该课程的 chunk 数（插件显示用）。"""
+        return self._count(self._user_filter(user_id, course_id))
 
-    def delete_user_data(self, user_id: str) -> int:
-        count = self.get_user_chunk_count(user_id)
+    def _count(self, count_filter: Filter) -> int:
+        return self.client.count(
+            collection_name=_COLLECTION, count_filter=count_filter, exact=True
+        ).count
+
+    def delete_user_data(self, user_id: str, course_id: Optional[str] = None) -> int:
+        """course_id 为 None 时删除该用户全部 chunk，否则只删该课程的。"""
+        query_filter = self._user_filter(user_id, course_id)
+        count = self._count(query_filter)
         self.client.delete(
             collection_name=_COLLECTION,
-            points_selector=FilterSelector(filter=self._user_filter(user_id)),
+            points_selector=FilterSelector(filter=query_filter),
         )
-        logger.info("Deleted %d chunks for user_id=%s", count, user_id)
+        logger.info("Deleted %d chunks for user_id=%s course_id=%s", count, user_id, course_id)
+        return count
+
+    def assign_missing_course(self, user_id: str, course_id: str) -> int:
+        """把该用户没有 course_id 的旧 chunk 归入 course_id（迁移 / link-anon 用，可重复执行）。"""
+        return self._set_course(self._missing_course_filter(user_id), course_id)
+
+    def remap_course(self, user_id: str, from_course_id: str, to_course_id: str) -> int:
+        """课程合并（link-anon）：把 from_course_id 的 chunk 改归 to_course_id。"""
+        return self._set_course(self._user_filter(user_id, from_course_id), to_course_id)
+
+    def _set_course(self, query_filter: Filter, course_id: str) -> int:
+        count = self._count(query_filter)
+        if count:
+            self.client.set_payload(
+                collection_name=_COLLECTION,
+                payload={"course_id": course_id},
+                key="metadata",
+                points=FilterSelector(filter=query_filter),
+            )
+            logger.info("Set course_id=%s on %d chunks", course_id, count)
         return count
 
     def reassign_user(self, from_user_id: str, to_user_id: str) -> int:

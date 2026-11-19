@@ -153,7 +153,7 @@ class FakeIngestion:
             "original_chunks_count": 1,
         }
 
-    async def delete_user_data(self, user_id):
+    async def delete_user_data(self, user_id, course_id=None):
         return 3
 
 

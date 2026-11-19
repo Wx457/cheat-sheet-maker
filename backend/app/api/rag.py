@@ -1,9 +1,26 @@
+"""
+知识库 API（Qdrant）。
+
+第 8 点起知识库按课程隔离（chunk payload metadata.course_id）：
+- ingest：写入 course_id 指定的课程；不传 → 默认课程「Uncategorized」
+- search：只检索该课程；不传 → 默认课程
+- chunks/count、DELETE chunks：传 course_id 只统计 / 删除该课程；不传 → 该用户全部（旧插件行为）
+course_id 不属于当前用户 → 404。未配置 Supabase 时没有课程概念，一律按用户全部数据处理。
+"""
+
 import traceback
 from datetime import datetime
+from typing import Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from app.application.services.course_service import (
+    CourseNotFoundError,
+    resolve_course,
+    resolve_course_id,
+)
 from app.application.services.ingestion_service import IngestionService
 from app.core.auth import CurrentUserId, require_admin
 from app.infrastructure.cache.redis_cache import get_cheat_sheet_cache
@@ -12,11 +29,23 @@ from app.infrastructure.rag.qdrant_store import QuotaExceededError
 router = APIRouter()
 
 
+def _course_not_found(course_id) -> HTTPException:
+    return HTTPException(status_code=404, detail=f"课程不存在: {course_id}")
+
+
+def _course_metadata(course: Optional[dict]) -> dict:
+    """写进 chunk payload 的课程字段；course_name 同时参与 embedding 的上下文增强。"""
+    if not course:
+        return {}
+    return {"course_id": course["id"], "course_name": course["name"]}
+
+
 class IngestRequest(BaseModel):
     """文本摄入请求模型"""
 
     text: str
     source: str
+    course_id: Optional[UUID] = None
 
 
 class IngestResponse(BaseModel):
@@ -35,6 +64,7 @@ class SearchRequest(BaseModel):
 
     query: str
     top_k: int = 3
+    course_id: Optional[UUID] = None
 
 
 class SearchResult(BaseModel):
@@ -69,17 +99,21 @@ class ChunkCountResponse(BaseModel):
 @router.get("/chunks/count", response_model=ChunkCountResponse)
 async def get_chunk_count(
     user_id: CurrentUserId,
+    course_id: Optional[UUID] = Query(None),
 ) -> ChunkCountResponse:
     """
-    获取当前用户的 chunks 数量
+    获取当前用户（传 course_id 时为该课程）的 chunks 数量
 
     用于前端同步显示最新的 chunks 数量。
     """
     try:
+        scope = await resolve_course_id(user_id, str(course_id) if course_id else None, use_default=False)
         ingestion = IngestionService.default()
-        chunks_count = ingestion.rag_service.get_user_chunk_count(user_id)
+        chunks_count = ingestion.rag_service.get_user_chunk_count(user_id, scope)
 
         return ChunkCountResponse(status="success", chunks_count=chunks_count)
+    except CourseNotFoundError:
+        raise _course_not_found(course_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取 chunks 数量时发生错误: {str(e)}")
@@ -96,10 +130,11 @@ async def ingest_text(
     接收原始文本，切分后存入 Qdrant 向量库。
     """
     try:
+        course = await resolve_course(user_id, str(payload.course_id) if payload.course_id else None)
         ingestion = IngestionService.default()
         ingest_result = await ingestion.process_text(
             text=payload.text,
-            metadata={"source": payload.source},
+            metadata={"source": payload.source, **_course_metadata(course)},
             user_id=user_id,
         )
 
@@ -111,6 +146,8 @@ async def ingest_text(
             truncated=ingest_result["truncated"],
             original_chunks_count=ingest_result["original_chunks_count"],
         )
+    except CourseNotFoundError:
+        raise _course_not_found(payload.course_id)
     except QuotaExceededError as e:
         raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
@@ -132,15 +169,18 @@ async def search_context(
     根据查询文本，返回最相关的文档片段。
     """
     try:
+        scope = await resolve_course_id(user_id, str(payload.course_id) if payload.course_id else None)
         ingestion = IngestionService.default()
         results = await ingestion.rag_service.search_context(
-            query=payload.query, user_id=user_id, k=payload.top_k
+            query=payload.query, user_id=user_id, k=payload.top_k, course_id=scope
         )
 
         # 转换为 SearchResult 对象列表
         search_results = [SearchResult(**result) for result in results]
 
         return SearchResponse(status="success", results=search_results)
+    except CourseNotFoundError:
+        raise _course_not_found(payload.course_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"搜索时发生错误: {str(e)}")
@@ -150,6 +190,7 @@ async def search_context(
 async def ingest_file(
     user_id: CurrentUserId,
     file: UploadFile = File(...),
+    course_id: Optional[UUID] = Form(None),
 ) -> IngestResponse:
     """
     将 PDF 文件摄入到 RAG 知识库
@@ -164,11 +205,13 @@ async def ingest_file(
         if not file.filename or not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="仅支持 PDF 文件格式")
 
+        course = await resolve_course(user_id, str(course_id) if course_id else None)
         ingestion = IngestionService.default()
         ingest_result = await ingestion.process_file(
             file_content=content,
             filename=file.filename or "unknown.pdf",
             user_id=user_id,
+            metadata=_course_metadata(course) or None,
         )
 
         return IngestResponse(
@@ -181,6 +224,8 @@ async def ingest_file(
         )
     except HTTPException:
         raise
+    except CourseNotFoundError:
+        raise _course_not_found(course_id)
     except QuotaExceededError as e:
         raise HTTPException(status_code=429, detail=str(e))
     except Exception as e:
@@ -193,17 +238,21 @@ async def ingest_file(
 @router.delete("/chunks", response_model=ClearResponse)
 async def delete_user_chunks(
     user_id: CurrentUserId,
+    course_id: Optional[UUID] = Query(None),
 ) -> ClearResponse:
     """
     删除当前用户的知识库向量数据（用户级操作）。
 
-    仅删除当前登录用户的 chunks（及其 Supabase ingest 批次记录），不影响其他用户数据。
-    供 Chrome 插件的 "Clear KB" 按钮调用。
+    传 course_id 只删该课程的 chunks，否则删该用户全部（及对应的 Supabase ingest 批次记录），
+    不影响其他用户数据。供 Chrome 插件的 "Clear" 按钮调用。
     """
     try:
+        scope = await resolve_course_id(user_id, str(course_id) if course_id else None, use_default=False)
         ingestion = IngestionService.default()
-        deleted_count = await ingestion.delete_user_data(user_id)
+        deleted_count = await ingestion.delete_user_data(user_id, course_id=scope)
         return ClearResponse(status="success", deleted_count=int(deleted_count))
+    except CourseNotFoundError:
+        raise _course_not_found(course_id)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"删除用户知识库时发生错误: {str(e)}")

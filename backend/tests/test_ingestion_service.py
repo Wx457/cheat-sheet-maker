@@ -36,8 +36,21 @@ def test_process_text_records_ingest_batch():
     assert result == INGEST_RESULT
     db.get_or_create_user_id.assert_called_once_with("anon-1")
     db.record_ingest_batch.assert_called_once_with(
-        "db-user-1", "batch-abc", "lecture.html", 12, False
+        "db-user-1", "batch-abc", "lecture.html", 12, False, None
     )
+
+
+def test_process_text_records_course_of_the_batch():
+    db = make_db()
+    svc = make_service(db)
+
+    asyncio.run(svc.process_text("hello", {"source": "s", "course_id": "course-1"}, "anon-1"))
+
+    db.record_ingest_batch.assert_called_once_with(
+        "db-user-1", "batch-abc", "s", 12, False, "course-1"
+    )
+    # course_id 也随 metadata 写进 Qdrant payload
+    assert svc.rag_service.ingest_text.call_args.kwargs["metadata"]["course_id"] == "course-1"
 
 
 def test_process_file_records_filename_as_source():
@@ -46,7 +59,9 @@ def test_process_file_records_filename_as_source():
 
     asyncio.run(svc.process_file(b"%PDF", "notes.pdf", "anon-1"))
 
-    db.record_ingest_batch.assert_called_once_with("db-user-1", "batch-abc", "notes.pdf", 12, False)
+    db.record_ingest_batch.assert_called_once_with(
+        "db-user-1", "batch-abc", "notes.pdf", 12, False, None
+    )
 
 
 def test_supabase_failure_does_not_fail_ingest():
@@ -74,5 +89,15 @@ def test_delete_user_data_also_deletes_ingest_batches():
     deleted = asyncio.run(svc.delete_user_data("anon-1"))
 
     assert deleted == 12
-    svc.rag_service.delete_user_data.assert_called_once_with("anon-1")
-    db.delete_user_ingest_batches.assert_called_once_with("db-user-1")
+    svc.rag_service.delete_user_data.assert_called_once_with("anon-1", None)
+    db.delete_user_ingest_batches.assert_called_once_with("db-user-1", None)
+
+
+def test_delete_course_data_only_touches_that_course():
+    db = make_db()
+    svc = make_service(db)
+
+    asyncio.run(svc.delete_user_data("anon-1", course_id="course-1"))
+
+    svc.rag_service.delete_user_data.assert_called_once_with("anon-1", "course-1")
+    db.delete_user_ingest_batches.assert_called_once_with("db-user-1", "course-1")

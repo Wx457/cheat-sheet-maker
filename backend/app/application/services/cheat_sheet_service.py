@@ -80,6 +80,7 @@ class CheatSheetService:
         user_id: str,
         k: int = 10,
         required_batch_id: Optional[str] = None,
+        course_id: Optional[str] = None,
     ) -> List[dict]:
         """Polling retry with exponential back-off for vector index consistency,
         plus a BM25 keyword fallback.
@@ -115,7 +116,9 @@ class CheatSheetService:
                         await asyncio.sleep(delay)
                     continue
 
-            results = await self.rag_service.search_context(query, user_id=user_id, k=k)
+            results = await self.rag_service.search_context(
+                query, user_id=user_id, k=k, course_id=course_id
+            )
 
             if results:
                 logger.info(
@@ -146,7 +149,9 @@ class CheatSheetService:
             max_attempts,
             user_id,
         )
-        fallback = await asyncio.to_thread(self.rag_service.find_chunks_by_user, user_id, k, query)
+        fallback = await asyncio.to_thread(
+            self.rag_service.find_chunks_by_user, user_id, k, query, course_id
+        )
         if fallback:
             logger.info("BM25 fallback returned %d chunks for user_id=%s", len(fallback), user_id)
         else:
@@ -161,6 +166,7 @@ class CheatSheetService:
         exam_type: ExamType = ExamType.final,
         user_id: Optional[str] = None,
         ingest_batch_id: Optional[str] = None,
+        course_id: Optional[str] = None,
     ) -> OutlineResponse:
         """
         Generate outline (RAG retrieval supported)
@@ -170,6 +176,7 @@ class CheatSheetService:
             context: User background information (e.g. course name)
             exam_type: Exam type
             user_id: User ID (for data isolation during RAG retrieval)
+            course_id: Only retrieve this course's chunks (None = all of the user's chunks)
         """
         cleaned_text = clean_raw_text(text)
         cleaned_context = clean_raw_text(context) if context else None
@@ -185,6 +192,7 @@ class CheatSheetService:
                 user_id=user_id,
                 k=15,
                 required_batch_id=ingest_batch_id,
+                course_id=course_id,
             )
             if ingest_batch_id and not results:
                 degraded_reason = (
@@ -253,12 +261,15 @@ class CheatSheetService:
 
         total_items = sum(budget_map.values())
 
-        # 2) RAG context
+        # 2) RAG context（第 8 点：只检索该课程的知识库；None = 该用户全部）
         rag_context_str = ""
+        course_id = str(request_data.course_id) if request_data.course_id else None
 
         if request_data.selected_topics:
             search_tasks = [
-                self.rag_service.search_context(topic.title, user_id=user_id, k=10)
+                self.rag_service.search_context(
+                    topic.title, user_id=user_id, k=10, course_id=course_id
+                )
                 for topic in request_data.selected_topics
             ]
             all_results = await asyncio.gather(*search_tasks)
@@ -280,7 +291,9 @@ class CheatSheetService:
             archetype = request_data.archetype.value if request_data.archetype else "general"
             query = request_data.user_context or archetype or "general knowledge"
 
-            results = await self.rag_service.search_context(query, user_id=user_id, k=15)
+            results = await self.rag_service.search_context(
+                query, user_id=user_id, k=15, course_id=course_id
+            )
             results = await self._rerank_chunks(query, results, top_n=8)
 
             if results:

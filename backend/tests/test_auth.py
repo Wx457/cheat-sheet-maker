@@ -70,7 +70,17 @@ class FakeVectors:
     def reassign_user(self, from_user_id, to_user_id):
         moved = self.chunks.pop(from_user_id, 0)
         self.chunks[to_user_id] = self.chunks.get(to_user_id, 0) + moved
+        self.remapped = []
+        self.assigned = []
         return moved
+
+    def remap_course(self, user_id, from_course, to_course):
+        self.remapped.append((user_id, from_course, to_course))
+        return 1
+
+    def assign_missing_course(self, user_id, course_id):
+        self.assigned.append((user_id, course_id))
+        return 0
 
 
 def _patch_ingestion(monkeypatch, vectors):
@@ -116,13 +126,20 @@ def test_clear_all_allowed_for_admin(monkeypatch):
 
 
 class FakeDb:
-    def __init__(self, status):
+    def __init__(self, status, remap=None):
         self.status = status
+        self.remap = remap or {}
         self.calls = []
 
     def link_anon_user(self, anon_id, clerk_id):
         self.calls.append((anon_id, clerk_id))
-        return self.status
+        return self.status, self.remap
+
+    def get_or_create_user_id(self, clerk_id):
+        return f"db-{clerk_id}"
+
+    def get_or_create_default_course(self, user_id):
+        return {"id": f"default-of-{user_id}"}
 
 
 @pytest.mark.parametrize("status", ["linked", "merged", "already_linked", "not_found"])
@@ -134,6 +151,19 @@ def test_link_moves_chunks_unless_conflict(status):
 
     assert result == {"status": status, "chunks_moved": 12}
     assert vectors.chunks == {"user_a": 12}
+    # 没有课程的旧 chunk 归入目标用户的默认课程
+    assert vectors.assigned == [("user_a", "default-of-db-user_a")]
+
+
+def test_link_merge_remaps_chunks_of_merged_courses():
+    vectors = FakeVectors({"anon-1": 4})
+    service = AccountService(
+        vectors=vectors, db=FakeDb("merged", remap={"anon-course": "target-course"})
+    )
+
+    asyncio.run(service.link_anon_data("anon-1", "user_a"))
+
+    assert vectors.remapped == [("user_a", "anon-course", "target-course")]
 
 
 def test_link_conflict_leaves_chunks_with_anon_id():

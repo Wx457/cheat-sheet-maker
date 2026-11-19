@@ -16,7 +16,15 @@ from .cheat_sheet import (
     PluginGenerateRequest,
     GenerateFinalResponse,
     CheatSheetSaveRequest,
+    SheetOrigin,
+    CheatSheetCreateRequest,
     CheatSheetRecord,
+    CourseCreateRequest,
+    CourseUpdateRequest,
+    CourseRecord,
+    CheatSheetSummary,
+    CourseDetail,
+    CourseDeleteResponse,
 )
 
 __all__ = [
@@ -37,5 +45,13 @@ __all__ = [
     "PluginGenerateRequest",
     "GenerateFinalResponse",
     "CheatSheetSaveRequest",
+    "SheetOrigin",
+    "CheatSheetCreateRequest",
     "CheatSheetRecord",
+    "CourseCreateRequest",
+    "CourseUpdateRequest",
+    "CourseRecord",
+    "CheatSheetSummary",
+    "CourseDetail",
+    "CourseDeleteResponse",
 ]

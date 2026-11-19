@@ -16,7 +16,7 @@ class FormPersistence {
    * Collect current form data.
    */
   collectFormData() {
-    const courseName = document.getElementById('courseName')?.value.trim() || ''
+    // 课程（含其默认的 level / archetype）由 popup.js 管理并存在 selected_course_id，这里不再保存课程名
     const educationLevel = document.querySelector('input[name="educationLevel"]:checked')?.value || 'Undergraduate'
     const examType = document.querySelector('input[name="examType"]:checked')?.value || 'Final'
     const pageLimit = document.querySelector('input[name="pageLimit"]:checked')?.value || 'Unlimited'
@@ -30,7 +30,6 @@ class FormPersistence {
       : ''
     
     return {
-      courseName,
       educationLevel,
       examType,
       pageLimit,
@@ -107,11 +106,6 @@ class FormPersistence {
         
         try {
           // Restore basic form fields
-          const courseNameInput = document.getElementById('courseName')
-          if (courseNameInput && savedData.courseName) {
-            courseNameInput.value = savedData.courseName
-          }
-          
           const syllabusInput = document.getElementById('syllabusInput')
           if (syllabusInput && savedData.syllabus) {
             syllabusInput.value = savedData.syllabus
@@ -205,11 +199,6 @@ class FormPersistence {
    * Initialize: bind event listeners and restore data.
    */
   async init() {
-    const courseNameInput = document.getElementById('courseName')
-    if (courseNameInput) {
-      courseNameInput.addEventListener('input', () => this.saveFormData())
-    }
-    
     const syllabusInput = document.getElementById('syllabusInput')
     if (syllabusInput) {
       syllabusInput.addEventListener('input', () => this.saveFormData())

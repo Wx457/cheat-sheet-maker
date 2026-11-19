@@ -14,6 +14,7 @@ from clerk_backend_api.security.types import (  # noqa: E402
     RequestState,
 )
 
+from app.application.services import course_service  # noqa: E402
 from app.core import auth as auth_module  # noqa: E402
 from app.core.config import settings  # noqa: E402
 from app.infrastructure.cache import redis_cache  # noqa: E402
@@ -38,6 +39,14 @@ def fake_cache(monkeypatch):
     cache = redis_cache.CheatSheetCache(FakeRedis(), ttl_seconds=3600)
     monkeypatch.setattr(redis_cache, "_cache", cache)
     return cache
+
+
+@pytest.fixture(autouse=True)
+def no_supabase_courses(monkeypatch):
+    """课程解析默认不碰真实 Supabase（容器里 .env 配了 Supabase，CI 里没有）：
+    resolve_course 返回 None，等价于"未接 Supabase、检索覆盖用户全部知识库"。
+    需要课程的测试自己再 monkeypatch course_service.get_supabase_store。"""
+    monkeypatch.setattr(course_service, "get_supabase_store", lambda: None)
 
 
 @pytest.fixture(autouse=True)

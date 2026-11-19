@@ -47,6 +47,7 @@ def test_generate_outline_returns_topics_with_user_id_and_batch(monkeypatch):
             "exam_type": ExamType.midterm,
             "user_id": "user-42",
             "ingest_batch_id": "batch-1",
+            "course_id": None,  # 未接 Supabase（conftest）：不按课程过滤
         }
     ]
 

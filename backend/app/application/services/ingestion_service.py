@@ -52,7 +52,7 @@ class IngestionService:
         result = await self.rag_service.ingest_text(
             raw_text=cleaned, source_name=source_name, user_id=user_id, metadata=metadata
         )
-        await self._record_batch(user_id, source_name, result)
+        await self._record_batch(user_id, source_name, result, (metadata or {}).get("course_id"))
         return result
 
     async def process_file(
@@ -76,21 +76,32 @@ class IngestionService:
         result = await self.rag_service.ingest_pdf(
             file_content=file_content, filename=filename, user_id=user_id, metadata=metadata
         )
-        await self._record_batch(user_id, filename, result)
+        await self._record_batch(user_id, filename, result, (metadata or {}).get("course_id"))
         return result
 
-    async def delete_user_data(self, user_id: str) -> int:
-        """删除用户的 Qdrant chunks，并同步删除其 ingest 批次记录。返回删除的 chunk 数。"""
-        deleted_count = await asyncio.to_thread(self.rag_service.delete_user_data, user_id)
+    async def delete_user_data(self, user_id: str, course_id: Optional[str] = None) -> int:
+        """删除用户（传 course_id 时只删该课程）的 Qdrant chunks，并同步删除 ingest 批次记录。
+
+        返回删除的 chunk 数。
+        """
+        deleted_count = await asyncio.to_thread(
+            self.rag_service.delete_user_data, user_id, course_id
+        )
         if self.db is not None:
             try:
                 db_user_id = await asyncio.to_thread(self.db.get_or_create_user_id, user_id)
-                await asyncio.to_thread(self.db.delete_user_ingest_batches, db_user_id)
+                await asyncio.to_thread(self.db.delete_user_ingest_batches, db_user_id, course_id)
             except Exception as exc:
                 logger.warning("Failed to delete ingest_batches for user_id=%s: %s", user_id, exc)
         return deleted_count
 
-    async def _record_batch(self, user_id: str, source: str, result: IngestResult) -> None:
+    async def _record_batch(
+        self,
+        user_id: str,
+        source: str,
+        result: IngestResult,
+        course_id: Optional[str] = None,
+    ) -> None:
         if self.db is None:
             return
         try:
@@ -102,6 +113,7 @@ class IngestionService:
                 source,
                 result["chunks_count"],
                 result["truncated"],
+                course_id,
             )
         except Exception as exc:
             logger.warning(

@@ -1,50 +1,12 @@
-from datetime import datetime, timezone
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api import cheat_sheets as cheat_sheets_api
 
 from conftest import bearer
+from fake_supabase import FakeSupabase
 
-SHEET_ID = "11111111-1111-4111-8111-111111111111"
-NOW = datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat()
-
-
-class FakeStore:
-    """内存版 SupabaseStore：按 user_id 隔离，模拟归属校验。"""
-
-    def __init__(self):
-        self.users = {}
-        self.sheets = {}
-
-    def get_or_create_user_id(self, clerk_id):
-        return self.users.setdefault(clerk_id, f"db-{clerk_id}")
-
-    def create_cheat_sheet(self, user_id, title, sections):
-        row = {
-            "id": SHEET_ID,
-            "user_id": user_id,
-            "title": title,
-            "sections": sections,
-            "created_at": NOW,
-            "updated_at": NOW,
-        }
-        self.sheets[SHEET_ID] = row
-        return row
-
-    def update_cheat_sheet(self, user_id, sheet_id, title, sections):
-        row = self.sheets.get(sheet_id)
-        if row is None or row["user_id"] != user_id:
-            return None
-        row.update(title=title, sections=sections)
-        return row
-
-    def get_cheat_sheet(self, user_id, sheet_id):
-        row = self.sheets.get(sheet_id)
-        if row is None or row["user_id"] != user_id:
-            return None
-        return row
+MISSING_ID = "11111111-1111-4111-8111-111111111111"
 
 
 def create_client(monkeypatch, store):
@@ -64,19 +26,20 @@ SECTIONS_FROM_WEBAPP = [
 ]
 
 
+def create(client, user="anon-1", **body):
+    body.setdefault("title", "Linear Algebra")
+    body.setdefault("sections", [])
+    return client.post("/api/cheat-sheets", headers=bearer(user), json=body)
+
+
 def test_create_strips_runtime_fields_and_returns_id(monkeypatch):
-    store = FakeStore()
+    store = FakeSupabase()
     client = create_client(monkeypatch, store)
 
-    response = client.post(
-        "/api/cheat-sheets",
-        headers=bearer("anon-1"),
-        json={"title": "Linear Algebra", "sections": SECTIONS_FROM_WEBAPP},
-    )
+    response = create(client, sections=SECTIONS_FROM_WEBAPP)
 
     assert response.status_code == 201
-    assert response.json()["id"] == SHEET_ID
-    saved = store.sheets[SHEET_ID]
+    saved = store.sheets[response.json()["id"]]
     assert saved["user_id"] == "db-anon-1"
     assert saved["sections"] == [
         {"title": "Eigenvalues", "items": [{"type": "equation", "content": "Av = \\lambda v"}]}
@@ -84,42 +47,33 @@ def test_create_strips_runtime_fields_and_returns_id(monkeypatch):
 
 
 def test_create_accepts_item_type_outside_enum(monkeypatch):
-    client = create_client(monkeypatch, FakeStore())
+    client = create_client(monkeypatch, FakeSupabase())
 
-    response = client.post(
-        "/api/cheat-sheets",
-        headers=bearer("anon-1"),
-        json={
-            "title": "",
-            "sections": [{"title": "S", "items": [{"type": "example", "content": "x"}]}],
-        },
+    response = create(
+        client, title="", sections=[{"title": "S", "items": [{"type": "example", "content": "x"}]}]
     )
 
     assert response.status_code == 201
 
 
 def test_get_and_update_are_scoped_to_owner(monkeypatch):
-    store = FakeStore()
+    store = FakeSupabase()
     client = create_client(monkeypatch, store)
-    client.post(
-        "/api/cheat-sheets",
-        headers=bearer("anon-1"),
-        json={"title": "Mine", "sections": []},
-    )
+    sheet_id = create(client, title="Mine").json()["id"]
 
-    assert client.get(f"/api/cheat-sheets/{SHEET_ID}", headers=bearer("anon-1")).status_code == 200
-    assert client.get(f"/api/cheat-sheets/{SHEET_ID}", headers=bearer("anon-2")).status_code == 404
+    assert client.get(f"/api/cheat-sheets/{sheet_id}", headers=bearer("anon-1")).status_code == 200
+    assert client.get(f"/api/cheat-sheets/{sheet_id}", headers=bearer("anon-2")).status_code == 404
 
     other = client.put(
-        f"/api/cheat-sheets/{SHEET_ID}",
+        f"/api/cheat-sheets/{sheet_id}",
         headers=bearer("anon-2"),
         json={"title": "Hijacked", "sections": []},
     )
     assert other.status_code == 404
-    assert store.sheets[SHEET_ID]["title"] == "Mine"
+    assert store.sheets[sheet_id]["title"] == "Mine"
 
     mine = client.put(
-        f"/api/cheat-sheets/{SHEET_ID}",
+        f"/api/cheat-sheets/{sheet_id}",
         headers=bearer("anon-1"),
         json={"title": "Renamed", "sections": []},
     )
@@ -128,7 +82,7 @@ def test_get_and_update_are_scoped_to_owner(monkeypatch):
 
 
 def test_invalid_sheet_id_is_rejected(monkeypatch):
-    client = create_client(monkeypatch, FakeStore())
+    client = create_client(monkeypatch, FakeSupabase())
 
     response = client.get("/api/cheat-sheets/not-a-uuid", headers=bearer("anon-1"))
 
@@ -138,10 +92,84 @@ def test_invalid_sheet_id_is_rejected(monkeypatch):
 def test_returns_503_when_supabase_not_configured(monkeypatch):
     client = create_client(monkeypatch, None)
 
-    response = client.post(
-        "/api/cheat-sheets",
-        headers=bearer("anon-1"),
-        json={"title": "x", "sections": []},
-    )
+    response = create(client, title="x")
 
     assert response.status_code == 503
+
+
+# ── 第 8 点：课程与版本 ──────────────────────────────────────────────────────
+
+
+def test_create_without_course_goes_to_default_course(monkeypatch):
+    store = FakeSupabase()
+    client = create_client(monkeypatch, store)
+
+    body = create(client).json()
+
+    course = store.courses[body["course_id"]]
+    assert course["is_default"] is True
+    assert course["name"] == "Uncategorized"
+    assert body["version"] == 1
+    assert body["origin"] == "generate"
+
+
+def test_each_generation_is_a_new_version_and_edits_keep_the_version(monkeypatch):
+    store = FakeSupabase()
+    client = create_client(monkeypatch, store)
+    course = store.create_course("db-anon-1", "CS229")
+
+    v1 = create(client, course_id=course["id"], generation_params={"topics": ["a"]}).json()
+    v2 = create(client, course_id=course["id"], generation_params={"topics": ["b"]}).json()
+    assert (v1["version"], v2["version"]) == (1, 2)
+    assert v1["id"] != v2["id"]
+
+    edited = client.put(
+        f"/api/cheat-sheets/{v2['id']}",
+        headers=bearer("anon-1"),
+        json={"title": "Edited", "sections": []},
+    ).json()
+    assert edited["version"] == 2
+    assert len(store.list_course_sheets("db-anon-1", course["id"])) == 2
+
+
+def test_reopening_same_cached_generation_does_not_duplicate_version(monkeypatch):
+    store = FakeSupabase()
+    client = create_client(monkeypatch, store)
+    params = {"selected_topics": [{"title": "Eigenvalues", "relevance_score": 1}]}
+
+    first = create(client, generation_params=params, sections=SECTIONS_FROM_WEBAPP).json()
+    again = create(client, generation_params=params, sections=SECTIONS_FROM_WEBAPP).json()
+
+    assert again["id"] == first["id"]
+    assert again["version"] == 1
+
+
+def test_create_rejects_other_users_course(monkeypatch):
+    store = FakeSupabase()
+    client = create_client(monkeypatch, store)
+    foreign = store.create_course("db-anon-2", "Not yours")
+
+    response = create(client, course_id=foreign["id"])
+
+    assert response.status_code == 404
+    assert store.sheets == {}
+
+
+def test_create_rejects_unknown_parent_version(monkeypatch):
+    client = create_client(monkeypatch, FakeSupabase())
+
+    response = create(client, parent_sheet_id=MISSING_ID, origin="regenerate")
+
+    assert response.status_code == 404
+
+
+def test_create_records_parent_and_origin(monkeypatch):
+    store = FakeSupabase()
+    client = create_client(monkeypatch, store)
+    parent = create(client).json()
+
+    child = create(client, parent_sheet_id=parent["id"], origin="regenerate", title="v2").json()
+
+    assert child["parent_sheet_id"] == parent["id"]
+    assert child["origin"] == "regenerate"
+    assert child["version"] == 2

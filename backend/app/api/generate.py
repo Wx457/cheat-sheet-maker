@@ -1,5 +1,8 @@
 import json
 import traceback
+from typing import Optional
+from uuid import UUID
+
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -9,10 +12,19 @@ from app.schemas import (
     OutlineResponse,
 )
 from app.application.services.cheat_sheet_service import CheatSheetService
+from app.application.services.course_service import CourseNotFoundError, resolve_course_id
 from app.core.auth import CurrentUserId
 from app.infrastructure.cache.redis_cache import get_cheat_sheet_cache, make_cache_key
 
 router = APIRouter()
+
+
+async def _resolve_course(user_id: str, course_id: Optional[UUID]) -> Optional[str]:
+    """第 8 点：校验课程归属（不属于 → 404）；不传 → 默认课程；未接 Supabase → None（检索全部知识库）"""
+    try:
+        return await resolve_course_id(user_id, str(course_id) if course_id else None)
+    except CourseNotFoundError:
+        raise HTTPException(status_code=404, detail=f"课程不存在: {course_id}")
 
 
 @router.post("/api/outline", response_model=OutlineResponse)
@@ -28,6 +40,7 @@ async def generate_outline(
     # raw_text is now optional; fall back to user_context then a generic query
     # so the service always receives a non-empty RAG search string
     query_text = payload.raw_text or payload.user_context or "key exam topics"
+    course_id = await _resolve_course(user_id, payload.course_id)
     try:
         service = CheatSheetService.default()
         return await service.generate_outline(
@@ -36,6 +49,7 @@ async def generate_outline(
             exam_type=payload.exam_type,
             user_id=user_id,
             ingest_batch_id=payload.ingest_batch_id,
+            course_id=course_id,
         )
     except Exception as e:
         traceback.print_exc()
@@ -54,7 +68,10 @@ async def generate_cheat_sheet_stream(
 
     Phase 5：同一用户 + 同一知识库 + 同一请求参数命中 Redis 缓存时直接重放事件（响应头 X-Cache: HIT）。
     只缓存完整成功的生成（收到 [DONE] 且至少 1 个 section）；中途异常 / 客户端断开不缓存。
+    第 8 点：只检索 course_id 对应课程的知识库；解析后的 course_id 写回 payload，因而也参与缓存键。
     """
+    resolved = await _resolve_course(user_id, payload.course_id)
+    payload = payload.model_copy(update={"course_id": UUID(resolved) if resolved else None})
     service = CheatSheetService.default()
     cache = get_cheat_sheet_cache()
     key = make_cache_key(

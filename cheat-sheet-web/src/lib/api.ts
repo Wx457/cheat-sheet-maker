@@ -1,11 +1,18 @@
 /**
  * FastAPI 请求封装
  *
- * 封装 webapp 用到的非流式端点（小抄持久化）。摄入 / 大纲 / 知识库管理由插件直接调用后端。
+ * 封装 webapp 用到的非流式端点（小抄持久化、课程）。摄入 / 大纲 / 知识库管理由插件直接调用后端。
  * 流式生成端点（/api/generate/stream）由 lib/streaming.ts 单独处理。
  */
 
-import type { CheatSheetRecord, CheatSheetSaveRequest } from '@/types'
+import type {
+  CheatSheetCreateRequest,
+  CheatSheetRecord,
+  CheatSheetSaveRequest,
+  Course,
+  CourseDetail,
+  CourseUpdateRequest,
+} from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -59,9 +66,9 @@ async function apiFetch<T>(
 // 小抄持久化（UPGRADE_PLAN 3-4-c；后端存 Supabase，按 Clerk 用户校验归属）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 生成完成后首次保存（POST /api/cheat-sheets），返回含 id 的记录 */
+/** 生成完成后首次保存（POST /api/cheat-sheets）：课程内新版本，返回含 id / version 的记录 */
 export async function createCheatSheet(
-  body: CheatSheetSaveRequest,
+  body: CheatSheetCreateRequest,
   getToken: TokenGetter,
 ): Promise<CheatSheetRecord> {
   return apiFetch<CheatSheetRecord>('/api/cheat-sheets', {
@@ -92,4 +99,42 @@ export async function loadCheatSheet(
     method: 'GET',
     signal,
   }, getToken)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 课程（第 8 点 · 8-1）：列表 / 详情（含版本）/ 改名 / 删除。新建课程在插件里完成
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 当前用户的课程，按最近使用倒序；默认课程「Uncategorized」总是存在 */
+export async function listCourses(getToken: TokenGetter, signal?: AbortSignal): Promise<Course[]> {
+  return apiFetch<Course[]>('/api/courses', { method: 'GET', signal }, getToken)
+}
+
+/** 课程 + 所有版本（不含 sections）。不存在或不属于该用户 → ApiError 404 */
+export async function getCourse(
+  id: string,
+  getToken: TokenGetter,
+  signal?: AbortSignal,
+): Promise<CourseDetail> {
+  return apiFetch<CourseDetail>(`/api/courses/${encodeURIComponent(id)}`, { method: 'GET', signal }, getToken)
+}
+
+/** 改名 / 改默认参数。重名 → ApiError 409 */
+export async function updateCourse(
+  id: string,
+  body: CourseUpdateRequest,
+  getToken: TokenGetter,
+): Promise<Course> {
+  return apiFetch<Course>(`/api/courses/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  }, getToken)
+}
+
+/** 删除课程：连同所有版本、知识库（不可恢复） */
+export async function deleteCourse(
+  id: string,
+  getToken: TokenGetter,
+): Promise<{ deleted_sheets: number; deleted_chunks: number }> {
+  return apiFetch(`/api/courses/${encodeURIComponent(id)}`, { method: 'DELETE' }, getToken)
 }

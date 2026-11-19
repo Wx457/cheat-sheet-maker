@@ -299,6 +299,24 @@
     }
     .auth-signin-btn:hover { background: #0ABAB5; color: #fff; }
 
+    /* ── Course picker ────────────────────────────────────────────────────── */
+    .new-course-form {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px dashed #0ABAB5;
+      border-radius: 6px;
+      background: #f0fdfa;
+    }
+    .new-course-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+    .new-course-actions button {
+      width: auto; padding: 5px 12px; font-size: 12px; font-weight: 600;
+      border-radius: 6px; cursor: pointer;
+    }
+    .new-course-actions .primary-btn { background: #0ABAB5; color: #fff; border: none; }
+    .new-course-actions .primary-btn:disabled { opacity: 0.5; cursor: default; }
+    .new-course-actions .secondary-btn { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+    .new-course-hint { margin: 6px 0 0; font-size: 11px; color: #6b7280; line-height: 1.4; }
+
     /* ── Notification banner ──────────────────────────────────────────────── */
     #runtime-notice {
       display: none;
@@ -337,9 +355,20 @@
 
         <div class="header-details" id="headerDetails">
 
+          <!-- Course: knowledge base, cheat sheet history and form defaults are all per course -->
           <div class="form-group">
-            <label class="section-title" for="courseName">Course Name / Context</label>
-            <input type="text" id="courseName" placeholder="e.g. Machine Learning CS229" />
+            <label class="section-title" for="courseSelect">Course</label>
+            <select id="courseSelect" disabled>
+              <option value="">Sign in to load your courses</option>
+            </select>
+            <div id="newCourseForm" class="new-course-form" style="display:none">
+              <input type="text" id="newCourseName" maxlength="100" placeholder="e.g. Machine Learning CS229" />
+              <div class="new-course-actions">
+                <button id="btnCancelCourse" type="button" class="secondary-btn">Cancel</button>
+                <button id="btnCreateCourse" type="button" class="primary-btn">Create</button>
+              </div>
+              <p class="new-course-hint">The education level and course type below become this course's defaults.</p>
+            </div>
           </div>
 
           <div class="form-group">
@@ -440,7 +469,7 @@
     <!-- Sticky footer -->
     <div class="footer">
       <div class="footer-left">
-        <button id="btnReset" class="reset-btn" title="Clear the knowledge base">🗑 Clear</button>
+        <button id="btnReset" class="reset-btn" title="Clear this course's knowledge base">🗑 Clear</button>
         <div id="chunkCounter" class="counter-bar">📚 0 Chunks</div>
       </div>
       <div class="footer-right">

@@ -1,8 +1,9 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ContentType(str, Enum):
@@ -77,6 +78,8 @@ class GenerateOutlineRequest(BaseModel):
     user_context: Optional[str] = None
     exam_type: ExamType = ExamType.final
     ingest_batch_id: Optional[str] = None
+    # 第 8 点：只检索该课程的知识库；不传 → 默认课程（未接 Supabase 时为全部知识库）
+    course_id: Optional[UUID] = None
 
 
 class GenerateSheetRequest(BaseModel):
@@ -98,6 +101,8 @@ class GenerateSheetRequest(BaseModel):
     )
     archetype: Optional[CourseArchetype] = None
     exam_type: ExamType = ExamType.final
+    # 第 8 点：只检索该课程的知识库；不传 → 默认课程（未接 Supabase 时为全部知识库）。参与缓存键
+    course_id: Optional[UUID] = None
     # Phase 5：跳过结果缓存、强制重新生成（新结果会覆盖缓存）。不参与缓存键
     no_cache: bool = False
 
@@ -158,10 +163,33 @@ class SavedSection(BaseModel):
 
 
 class CheatSheetSaveRequest(BaseModel):
-    """POST / PUT /api/cheat-sheets 请求体"""
+    """PUT /api/cheat-sheets/{id} 请求体（手动编辑：修改当前版本）"""
 
     title: str = Field("", max_length=200)
     sections: List[SavedSection] = Field(..., max_length=100)
+
+
+class SheetOrigin(str, Enum):
+    generate = "generate"
+    regenerate = "regenerate"  # 8-2 部分重新生成
+
+
+class CheatSheetCreateRequest(CheatSheetSaveRequest):
+    """POST /api/cheat-sheets 请求体：一次生成 = 一个新版本（第 8 点）"""
+
+    # 不传 → 默认课程「Uncategorized」
+    course_id: Optional[UUID] = None
+    # 生成这一版所用的请求参数（GenerateSheetRequest 的 JSON），8-2 重新生成时复用
+    generation_params: Optional[Dict[str, Any]] = None
+    origin: SheetOrigin = SheetOrigin.generate
+    parent_sheet_id: Optional[UUID] = None
+
+    @field_validator("generation_params")
+    @classmethod
+    def _limit_params_size(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if v is not None and len(str(v)) > 20000:
+            raise ValueError("generation_params too large")
+        return v
 
 
 class CheatSheetRecord(BaseModel):
@@ -170,8 +198,81 @@ class CheatSheetRecord(BaseModel):
     id: str
     title: str
     sections: List[SavedSection]
+    course_id: Optional[str] = None
+    version: int = 1
+    origin: str = "generate"
+    parent_sheet_id: Optional[str] = None
+    generation_params: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+
+
+# ── 课程（第 8 点 · 8-1） ────────────────────────────────────────────────────
+
+
+class CourseCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    archetype: Optional[CourseArchetype] = None
+    academic_level: Optional[AcademicLevel] = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("course name must not be blank")
+        return v
+
+
+class CourseUpdateRequest(BaseModel):
+    """只更新给出的字段"""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    archetype: Optional[CourseArchetype] = None
+    academic_level: Optional[AcademicLevel] = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("course name must not be blank")
+        return v
+
+
+class CourseRecord(BaseModel):
+    id: str
+    name: str
+    archetype: Optional[str] = None
+    academic_level: Optional[str] = None
+    is_default: bool = False
+    sheet_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class CheatSheetSummary(BaseModel):
+    """课程详情里的版本列表项（不含 sections）"""
+
+    id: str
+    title: str
+    version: int
+    origin: str
+    parent_sheet_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CourseDetail(BaseModel):
+    course: CourseRecord
+    sheets: List[CheatSheetSummary]
+
+
+class CourseDeleteResponse(BaseModel):
+    deleted_sheets: int
+    deleted_chunks: int
 
 
 __all__ = [
@@ -194,5 +295,13 @@ __all__ = [
     "SavedItem",
     "SavedSection",
     "CheatSheetSaveRequest",
+    "SheetOrigin",
+    "CheatSheetCreateRequest",
     "CheatSheetRecord",
+    "CourseCreateRequest",
+    "CourseUpdateRequest",
+    "CourseRecord",
+    "CheatSheetSummary",
+    "CourseDetail",
+    "CourseDeleteResponse",
 ]

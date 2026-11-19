@@ -1,9 +1,9 @@
 """
-小抄持久化 API（Supabase，Phase 3 / UPGRADE_PLAN 3-4-b）
+小抄持久化 API（Supabase，Phase 3 / UPGRADE_PLAN 3-4-b；第 8 点起每次生成 = 课程内一个新版本）
 
-- POST /api/cheat-sheets         SSE onDone 时保存，返回含 id 的记录
-- PUT  /api/cheat-sheets/{id}    用户编辑 / 拖拽 / 删除后覆盖保存（前端 debounce）
-- GET  /api/cheat-sheets/{id}    刷新页面时恢复
+- POST /api/cheat-sheets         SSE onDone 时保存为新版本（课程内 version 递增），返回含 id 的记录
+- PUT  /api/cheat-sheets/{id}    用户编辑 / 拖拽 / 删除后覆盖保存当前版本（前端 debounce）
+- GET  /api/cheat-sheets/{id}    刷新页面 / 打开历史版本
 
 身份来自 Clerk session token（app.core.auth），映射到 users.clerk_id → users.id。
 secret key 绕过 RLS，归属校验由 SupabaseStore 按 user_id 过滤完成：
@@ -18,7 +18,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.core.auth import CurrentUserId
 from app.infrastructure.db.supabase_store import SupabaseStore, get_supabase_store
-from app.schemas import CheatSheetRecord, CheatSheetSaveRequest
+from app.schemas import CheatSheetCreateRequest, CheatSheetRecord, CheatSheetSaveRequest
 
 router = APIRouter()
 
@@ -36,17 +36,32 @@ def _require_store() -> SupabaseStore:
 @router.post("/api/cheat-sheets", response_model=CheatSheetRecord, status_code=201)
 async def create_cheat_sheet(
     user_id: CurrentUserId,
-    payload: CheatSheetSaveRequest = Body(...),
+    payload: CheatSheetCreateRequest = Body(...),
 ) -> CheatSheetRecord:
     store = _require_store()
     try:
         db_user_id = await asyncio.to_thread(store.get_or_create_user_id, user_id)
+        if payload.course_id:
+            course = await asyncio.to_thread(store.get_course, db_user_id, str(payload.course_id))
+            if course is None:
+                raise HTTPException(status_code=404, detail=f"课程不存在: {payload.course_id}")
+        else:
+            course = await asyncio.to_thread(store.get_or_create_default_course, db_user_id)
+        parent_id = str(payload.parent_sheet_id) if payload.parent_sheet_id else None
+        if parent_id and await asyncio.to_thread(store.get_cheat_sheet, db_user_id, parent_id) is None:
+            raise HTTPException(status_code=404, detail=f"父版本不存在: {parent_id}")
         row = await asyncio.to_thread(
             store.create_cheat_sheet,
             db_user_id,
+            course["id"],
             payload.title,
             [s.model_dump() for s in payload.sections],
+            payload.generation_params,
+            payload.origin.value,
+            parent_id,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"保存小抄时发生错误: {str(e)}")
