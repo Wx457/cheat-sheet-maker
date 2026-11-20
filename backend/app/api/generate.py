@@ -10,6 +10,7 @@ from app.schemas import (
     GenerateOutlineRequest,
     GenerateSheetRequest,
     OutlineResponse,
+    RegenerateSectionsRequest,
 )
 from app.application.services.cheat_sheet_service import CheatSheetService
 from app.application.services.course_service import CourseNotFoundError, resolve_course_id
@@ -116,6 +117,29 @@ async def generate_cheat_sheet_stream(
         event_generator(),
         media_type="text/event-stream",
         headers={**headers, "X-Cache": "BYPASS" if payload.no_cache else "MISS"},
+    )
+
+
+@router.post("/api/generate/regenerate")
+async def regenerate_sections_stream(
+    user_id: CurrentUserId,
+    payload: RegenerateSectionsRequest = Body(...),
+):
+    """
+    8-2 部分重新生成（SSE）：只重写选中的 section，事件里的 `_index` 是它要替换的位置。
+
+    不读也不写生成缓存：重新生成本身就是为了换一版；结果由前端保存为新版本
+    （origin = regenerate，parent_sheet_id = 当前版本），刷新后按 sheetId 加载即可。
+    """
+    resolved = await _resolve_course(user_id, payload.params.course_id)
+    params = payload.params.model_copy(update={"course_id": UUID(resolved) if resolved else None})
+    payload = payload.model_copy(update={"params": params})
+    service = CheatSheetService.default()
+
+    return StreamingResponse(
+        service.stream_regenerated_sections(request_data=payload, user_id=user_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

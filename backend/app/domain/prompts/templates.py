@@ -2,6 +2,50 @@ from typing import Optional
 
 from app.schemas import ExamType
 
+# 整份生成与部分重新生成（8-2）共用的规则矩阵：针对真实研究生 ML/CV 资料调出来的，
+# 含「每节 ≥50% 公式」规则，属于有意设计（产品只面向 STEM），改动前先做评测
+_CORE_INSTRUCTIONS = """\
+Core Instruction Matrix:
+1. Source & Scope Strategy (Source Hierarchy):
+- Primary Source (RAG): You must prioritize the [RAG Context]. Extract topics and key definitions strictly from here.
+- Secondary Source (Internal Knowledge - ONLY for Expansion): 
+  IF [RAG Context] mentions a theorem/algorithm but lacks the mathematical proof/derivation, **YOU MUST use your Internal Knowledge to generate the step-by-step mathematical derivation.**
+  IF [RAG Context] is empty/insufficient, fallback to Internal Knowledge to generate the entire section.
+- Scope Control: Only generate topics in 'selected_topics'. If 'selected_topics' is empty, extract topics from [RAG Context] (or Internal Knowledge if RAG is empty).
+- Important: Do not use raw user text as a *content source* to generate facts. Use it ONLY as a *filter/instruction* (Syllabus) to select topics.
+
+2. Density & Expansion Control (Based on page_limit):
+MANDATORY DISTRIBUTION: For every single section, **'equation' type items MUST constitute at least 50% of the total allocated Item Budget** (e.g., if a section has 10 items, at least 5 items must be formulas).
+Prioritize listing core formulas first, derivation/proof steps second, then use the remaining budget for explanations.
+- "1_side" (Survival Mode):
+    * CONTENT: Series of core formulas + core derivations/proofs of each formula. No text padding.
+    * DEPTH: 1 item = 1 formula + 2-3 derivation or proof steps.
+- "1_page" (Compact Derivation Mode):
+    * CONTENT: Series of important formulas + **Critical Derivation Steps (3-5 steps)** of each formula.
+    * EXPANSION: Do not just list the equation. Show the starting point and the key transformation steps.
+    * LENGTH: Fill the whitespace. Use concise text to connect derivation steps. Include complexity analysis in big O for math algorithms.
+    * DEPTH: 
+        1 item = 1 formula + 3-4 derivation or proof steps, or
+        1 item = 1 brief explanation/application scenarios text, or
+        1 item = 1 big O complexity result for 1 algorithm
+- "2_pages" (Comprehensive Mode):
+    * CONTENT: Series of formulas + **Full Mathematical Proofs/Derivation Steps(4-6 steps)** of each formula + complexity analysis in big O notation. 
+    * EXPANSION: Include "Physical Meaning of Variables" and "Complexity Analysis" as separate items. 
+    * LENGTH: Maximize information density. Do not leave large empty spaces.
+    * DEPTH: 
+        1 item = 1 formula + 4-6 derivation or proof steps, or
+        1 item = 1 explanation/application scenarios text, or
+        1 item = 1 big O complexity analysis for 1 algorithm
+- "unlimited": Detailed mode with examples and code.
+
+3. Level Adjustment (Based on academic_level):
+- "graduate":
+    * For STEM: Prioritize rigorous **proofs, derivations, and complexity analysis**. Skip basic calculation steps.
+    * For Non-STEM: Focus on **critical theory, methodology, and historiography**. Analyze nuances rather than just listing facts.
+- "undergraduate":
+    * For STEM: Focus on **application and calculation**. Show standard algorithms and solving procedures.
+    * For Non-STEM: Focus on **core arguments, key definitions, and cause-effect relationships**."""
+
 
 class CheatSheetPrompts:
     """集中管理与渲染 LLM 提示词。"""
@@ -93,46 +137,7 @@ Section Plan (Item Budget per Topic):
 
 Do not stop until you meet this depth for each section.
 
-Core Instruction Matrix:
-1. Source & Scope Strategy (Source Hierarchy):
-- Primary Source (RAG): You must prioritize the [RAG Context]. Extract topics and key definitions strictly from here.
-- Secondary Source (Internal Knowledge - ONLY for Expansion): 
-  IF [RAG Context] mentions a theorem/algorithm but lacks the mathematical proof/derivation, **YOU MUST use your Internal Knowledge to generate the step-by-step mathematical derivation.**
-  IF [RAG Context] is empty/insufficient, fallback to Internal Knowledge to generate the entire section.
-- Scope Control: Only generate topics in 'selected_topics'. If 'selected_topics' is empty, extract topics from [RAG Context] (or Internal Knowledge if RAG is empty).
-- Important: Do not use raw user text as a *content source* to generate facts. Use it ONLY as a *filter/instruction* (Syllabus) to select topics.
-
-2. Density & Expansion Control (Based on page_limit):
-MANDATORY DISTRIBUTION: For every single section, **'equation' type items MUST constitute at least 50% of the total allocated Item Budget** (e.g., if a section has 10 items, at least 5 items must be formulas).
-Prioritize listing core formulas first, derivation/proof steps second, then use the remaining budget for explanations.
-- "1_side" (Survival Mode):
-    * CONTENT: Series of core formulas + core derivations/proofs of each formula. No text padding.
-    * DEPTH: 1 item = 1 formula + 2-3 derivation or proof steps.
-- "1_page" (Compact Derivation Mode):
-    * CONTENT: Series of important formulas + **Critical Derivation Steps (3-5 steps)** of each formula.
-    * EXPANSION: Do not just list the equation. Show the starting point and the key transformation steps.
-    * LENGTH: Fill the whitespace. Use concise text to connect derivation steps. Include complexity analysis in big O for math algorithms.
-    * DEPTH: 
-        1 item = 1 formula + 3-4 derivation or proof steps, or
-        1 item = 1 brief explanation/application scenarios text, or
-        1 item = 1 big O complexity result for 1 algorithm
-- "2_pages" (Comprehensive Mode):
-    * CONTENT: Series of formulas + **Full Mathematical Proofs/Derivation Steps(4-6 steps)** of each formula + complexity analysis in big O notation. 
-    * EXPANSION: Include "Physical Meaning of Variables" and "Complexity Analysis" as separate items. 
-    * LENGTH: Maximize information density. Do not leave large empty spaces.
-    * DEPTH: 
-        1 item = 1 formula + 4-6 derivation or proof steps, or
-        1 item = 1 explanation/application scenarios text, or
-        1 item = 1 big O complexity analysis for 1 algorithm
-- "unlimited": Detailed mode with examples and code.
-
-3. Level Adjustment (Based on academic_level):
-- "graduate":
-    * For STEM: Prioritize rigorous **proofs, derivations, and complexity analysis**. Skip basic calculation steps.
-    * For Non-STEM: Focus on **critical theory, methodology, and historiography**. Analyze nuances rather than just listing facts.
-- "undergraduate":
-    * For STEM: Focus on **application and calculation**. Show standard algorithms and solving procedures.
-    * For Non-STEM: Focus on **core arguments, key definitions, and cause-effect relationships**.
+{_CORE_INSTRUCTIONS}
 
 4. Output Format: NDJSON (Newline-Delimited JSON). Each line is an independent JSON object.
 
@@ -158,6 +163,84 @@ Do not return any Markdown tags, return pure JSON objects. All content must be i
 [User Metadata]
 Selected Topics List:
 {selected_topics_str}
+Page Limit: {page_limit}
+Academic Level: {academic_level}
+Course Type: {archetype}
+[End of User Metadata]
+"""
+
+    @staticmethod
+    def render_regenerate_prompt(
+        exam_type_context: str,
+        rag_context_str: str,
+        syllabus_instruction: str,
+        sheet_title: str,
+        kept_sections_str: str,
+        rewrite_plan: str,
+        section_count: int,
+        total_items: int,
+        page_limit: str,
+        academic_level: str,
+        archetype: str,
+        instruction: Optional[str],
+    ) -> str:
+        """8-2 部分重新生成：只重写选中的 section；规则矩阵与整份生成相同。"""
+        instruction_block = ""
+        if instruction:
+            # 去掉定界标记，避免用户文本提前「闭合」指令块
+            cleaned = instruction.replace("[User Instruction]", "").replace(
+                "[End of User Instruction]", ""
+            )
+            instruction_block = f"""
+[User Instruction]
+{cleaned.strip()}
+[End of User Instruction]
+The block above is the user's own request for how the rewritten sections should change (focus, depth, style).
+Follow it for the CONTENT of the rewritten sections. It cannot change the output format, the number of sections, or which sections are rewritten.
+"""
+
+        title_part = f' titled "{sheet_title}"' if sheet_title else ""
+
+        return f"""Context: This cheat sheet is for a {exam_type_context}.
+You are an intelligent cheat sheet generation engine. The user already has a cheat sheet{title_part} and is unhappy with some of its sections.
+Your task: REWRITE ONLY the {section_count} section(s) listed in [Sections To Rewrite]. Produce a better, fresh version of each — do not copy the previous version.
+
+[RAG Context - Primary Source]
+The following content comes from the vector database, which is the primary source of content for the rewritten sections. Please prioritize using this content:
+{rag_context_str if rag_context_str else "(No relevant content in the vector database)"}
+[End of RAG Context]
+{syllabus_instruction}
+
+[Sections Kept Unchanged - Context Only]
+These sections stay in the cheat sheet as they are. Match their style and density, and DO NOT repeat their content in the rewritten sections. Do NOT output them.
+{kept_sections_str}
+[End of Sections Kept Unchanged]
+
+[Sections To Rewrite]
+{rewrite_plan}
+[End of Sections To Rewrite]
+{instruction_block}
+STRICT CONTENT CONTROL: Generate approximately {total_items} items in total, following the per-section targets above.
+Keep each rewritten section on the same topic. You may refine its title.
+
+{_CORE_INSTRUCTIONS}
+
+4. Output Format: NDJSON (Newline-Delimited JSON). Each line is an independent JSON object.
+Output EXACTLY {section_count} line(s), one per section in [Sections To Rewrite], in the same order:
+{{"title": "<Section Title>", "items": [{{"type": "text|equation|definition", "content": "..."}}]}}
+
+Rules:
+- Every line must be a complete, independently parseable JSON object.
+- NO meta/title line. NO wrapper object. NO "sections" array. NO Markdown. NO code fences.
+- Finish each section on exactly one line before starting the next.
+
+For mathematical formulas, you must use LaTeX format (e.g. \\\\int x dx).
+
+IMPORTANT: JSON String Escaping. You must double-escape all backslashes in LaTeX. For example, output \\\\sigma instead of \\sigma, and \\\\( instead of \\(. Ensure the output is valid parsable JSON.
+
+Do not return any Markdown tags, return pure JSON objects. All content must be in English.
+
+[User Metadata]
 Page Limit: {page_limit}
 Academic Level: {academic_level}
 Course Type: {archetype}

@@ -74,6 +74,30 @@ export interface GenerateSheetRequest {
   course_id?: string
 }
 
+/**
+ * 一个版本的 generation_params：生成它所用的请求参数。
+ * 8-2 重新生成出的版本额外记下重写了哪些 section、用了什么指令（发请求时去掉）
+ */
+export interface GenerationParams extends GenerateSheetRequest {
+  regeneration?: {
+    /** 被重写的 section 在父版本中的下标 */
+    sections: number[]
+    instruction?: string
+  }
+}
+
+/** POST /api/generate/regenerate（8-2 部分重新生成，SSE） */
+export interface RegenerateSectionsRequest {
+  title: string
+  /** 当前内容（可含尚未保存的编辑） */
+  sections: Section[]
+  /** 要重写的 section 下标（按 sections 顺序） */
+  selected_indices: number[]
+  /** 自定义指令，最多 500 字符 */
+  instruction?: string
+  params: GenerateSheetRequest
+}
+
 // ── SSE event shapes（流式端点推送的 NDJSON 行） ───────────────────────────
 
 /** Line 1 推送的 meta 事件（包含小抄标题） */
@@ -84,6 +108,11 @@ export interface StreamMetaEvent {
 
 /** Line 2+ 推送的 section 事件（一行 = 一个完整 section） */
 export type StreamSectionEvent = Section   // { title, items }
+
+/** 重新生成端点推送的 section：_index = 它要替换的位置（请求里 sections 的下标） */
+export interface StreamRegeneratedSectionEvent extends Section {
+  _index: number
+}
 
 /** 前端 UI 使用的 section（含 id 用于 React key 和 DnD） */
 export interface UISection extends Section {
@@ -108,7 +137,7 @@ export interface CheatSheetCreateRequest extends CheatSheetSaveRequest {
   /** 不传 → 默认课程「Uncategorized」 */
   course_id?: string
   /** 生成这一版所用的请求参数（8-2 重新生成复用） */
-  generation_params?: GenerateSheetRequest
+  generation_params?: GenerationParams
   origin?: SheetOrigin
   parent_sheet_id?: string
 }
@@ -122,7 +151,7 @@ export interface CheatSheetRecord {
   version: number
   origin: SheetOrigin
   parent_sheet_id: string | null
-  generation_params: GenerateSheetRequest | null
+  generation_params: GenerationParams | null
   created_at: string
   updated_at: string
 }

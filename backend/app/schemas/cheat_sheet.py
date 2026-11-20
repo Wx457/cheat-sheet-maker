@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ContentType(str, Enum):
@@ -192,6 +192,40 @@ class CheatSheetCreateRequest(CheatSheetSaveRequest):
         return v
 
 
+class RegenerateSectionsRequest(BaseModel):
+    """POST /api/generate/regenerate（8-2 部分重新生成，SSE）
+
+    sections 由前端传当前内容（可能含尚未保存的编辑）；结果由前端保存为新版本
+    （origin = regenerate，parent_sheet_id = 当前版本）。
+    """
+
+    title: str = Field("", max_length=200)
+    sections: List[SavedSection] = Field(..., min_length=1, max_length=100)
+    # 要重写的 section 在 sections 中的下标（按输出顺序）
+    selected_indices: List[int] = Field(..., min_length=1, max_length=100)
+    # 用户的自定义指令（可选），放在 prompt 里独立的定界块中
+    instruction: Optional[str] = Field(None, max_length=500)
+    # 生成这一版所用的参数（该版本的 generation_params）；course_id 决定检索哪门课的知识库
+    params: GenerateSheetRequest = Field(default_factory=GenerateSheetRequest)
+
+    @field_validator("instruction")
+    @classmethod
+    def _blank_instruction_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @model_validator(mode="after")
+    def _check_indices(self) -> "RegenerateSectionsRequest":
+        n = len(self.sections)
+        if any(i < 0 or i >= n for i in self.selected_indices):
+            raise ValueError("selected_indices out of range")
+        if len(set(self.selected_indices)) != len(self.selected_indices):
+            raise ValueError("selected_indices must be unique")
+        return self
+
+
 class CheatSheetRecord(BaseModel):
     """/api/cheat-sheets 响应体"""
 
@@ -297,6 +331,7 @@ __all__ = [
     "CheatSheetSaveRequest",
     "SheetOrigin",
     "CheatSheetCreateRequest",
+    "RegenerateSectionsRequest",
     "CheatSheetRecord",
     "CourseCreateRequest",
     "CourseUpdateRequest",

@@ -36,6 +36,13 @@ const STATUS_CONFIG: Record<
       <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-ping" />
     ),
   },
+  regenerating: {
+    label: 'Regenerating…',
+    color: 'text-amber-600',
+    icon: (
+      <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+    ),
+  },
   complete: {
     label: 'Done',
     color: 'text-green-500',
@@ -81,6 +88,7 @@ export default function StreamingStatus() {
   const status = useCheatSheetStore((s) => s.status)
   const error = useCheatSheetStore((s) => s.error)
   const sections = useCheatSheetStore((s) => s.sections)
+  const regeneratingCount = useCheatSheetStore((s) => s.regeneratingIds.length)
 
   const cfg = STATUS_CONFIG[status]
 
@@ -96,6 +104,13 @@ export default function StreamingStatus() {
       {status === 'streaming' && sections.length > 0 && (
         <span className="text-zinc-400">
           {sections.length} section{sections.length > 1 ? 's' : ''} received
+        </span>
+      )}
+
+      {/* 8-2 重新生成中：还剩几个 section 没收到 */}
+      {status === 'regenerating' && (
+        <span className="text-zinc-400">
+          {regeneratingCount} section{regeneratingCount !== 1 ? 's' : ''} left
         </span>
       )}
 

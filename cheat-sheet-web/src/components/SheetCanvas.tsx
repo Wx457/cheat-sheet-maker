@@ -131,13 +131,26 @@ interface FragmentViewProps {
   isLast: boolean
   isDragging: boolean
   dropTarget: DropTarget | null
+  /** 8-2 选择模式：点击切换选中，不进入编辑 / 拖拽 */
+  selecting: boolean
+  selected: boolean
+  /** 8-2：正在重写，锁定不可编辑 */
+  regenerating: boolean
+  onToggleSelect: (id: string) => void
 }
 
-function FragmentView({ section, frag, fragKey, isLast, isDragging, dropTarget }: FragmentViewProps) {
+function FragmentView({
+  section, frag, fragKey, isLast, isDragging, dropTarget,
+  selecting, selected, regenerating, onToggleSelect,
+}: FragmentViewProps) {
   const { setNodeRef } = useDroppable({ id: fragKey, data: { sectionId: section.id, isHead: frag.isHead } })
 
   const showBefore = frag.isHead && dropTarget?.sectionId === section.id && dropTarget.position === 'before'
   const showAfter = isLast && dropTarget?.sectionId === section.id && dropTarget.position === 'after'
+
+  // 选择模式 / 重写中：在捕获阶段拦下事件，子元素的编辑（onClick）和拖拽手柄（onPointerDown）都收不到
+  const intercept = selecting || regenerating
+  const stop = (e: React.SyntheticEvent) => { e.stopPropagation(); e.preventDefault() }
 
   return (
     <div
@@ -146,7 +159,15 @@ function FragmentView({ section, frag, fragKey, isLast, isDragging, dropTarget }
         'sheet-fragment',
         frag.gapBefore ? 'sheet-gap-before' : '',
         isDragging ? 'sheet-dragging' : '',
+        selecting ? 'sheet-selectable' : '',
+        selected ? 'sheet-selected' : '',
+        regenerating ? 'sheet-regenerating' : '',
       ].join(' ')}
+      onPointerDownCapture={intercept ? stop : undefined}
+      onClickCapture={intercept ? (e) => { stop(e); if (selecting) onToggleSelect(section.id) } : undefined}
+      role={selecting ? 'checkbox' : undefined}
+      aria-checked={selecting ? selected : undefined}
+      aria-busy={regenerating || undefined}
     >
       {showBefore && <div className="no-print sheet-drop-line sheet-drop-before" />}
 
@@ -247,6 +268,10 @@ export default function SheetCanvas({ title, pageLimit }: SheetCanvasProps) {
   const presetId        = useCheatSheetStore((s) => s.presetId)
   const fontSize        = useCheatSheetStore((s) => s.fontSize)
   const reorderSections = useCheatSheetStore((s) => s.reorderSections)
+  const selecting       = useCheatSheetStore((s) => s.selecting)
+  const selectedIds     = useCheatSheetStore((s) => s.selectedIds)
+  const regeneratingIds = useCheatSheetStore((s) => s.regeneratingIds)
+  const toggleSelected  = useCheatSheetStore((s) => s.toggleSelected)
 
   const preset = FORMAT_PRESETS[presetId]
   const targetPages = PAGE_LIMIT_PAGES[pageLimit] ?? null
@@ -437,7 +462,7 @@ export default function SheetCanvas({ title, pageLimit }: SheetCanvasProps) {
             onDragEnd={handleDragEnd}
             onDragCancel={handleDragCancel}
           >
-            <div className="sheet sheet-pages print-block" style={sheetStyle}>
+            <div className={['sheet sheet-pages print-block', selecting ? 'sheet-selecting' : ''].join(' ')} style={sheetStyle}>
               {pages.map((page, pi) => {
                 const overLimit = targetPages !== null && pi >= targetPages
                 return (
@@ -460,6 +485,10 @@ export default function SheetCanvas({ title, pageLimit }: SheetCanvasProps) {
                                   isLast={lastFragKey.get(frag.sectionId) === fragKey}
                                   isDragging={activeId === frag.sectionId}
                                   dropTarget={dropTarget}
+                                  selecting={selecting}
+                                  selected={selectedIds.includes(frag.sectionId)}
+                                  regenerating={regeneratingIds.includes(frag.sectionId)}
+                                  onToggleSelect={toggleSelected}
                                 />
                               )
                             })}

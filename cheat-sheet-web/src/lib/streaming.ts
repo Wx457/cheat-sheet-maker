@@ -7,10 +7,20 @@
  *  3. 按 "\n\n" 切分 SSE 事件（每个事件以双换行结束）
  *  4. 去掉 "data: " 前缀后 JSON.parse
  *  5. 根据事件类型调用对应回调：meta → onMeta，section → onSection，[DONE] → onDone
+ *
+ * 两个端点共用同一套读取逻辑：
+ *  - /api/generate/stream      整份生成（startStreaming）
+ *  - /api/generate/regenerate  8-2 部分重新生成（startRegenerateStreaming），section 事件带 _index
  */
 
 import { authHeaders, type TokenGetter } from '@/lib/api'
-import type { GenerateSheetRequest, StreamMetaEvent, StreamSectionEvent } from '@/types'
+import type {
+  GenerateSheetRequest,
+  RegenerateSectionsRequest,
+  StreamMetaEvent,
+  StreamRegeneratedSectionEvent,
+  StreamSectionEvent,
+} from '@/types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -29,35 +39,35 @@ export interface StreamCallbacks {
   onError: (err: Error) => void
 }
 
+export interface RegenerateCallbacks {
+  /** 收到一个重写好的 section（_index 指向它要替换的位置） */
+  onSection: (section: StreamRegeneratedSectionEvent) => void
+  onDone: () => void
+  onError: (err: Error) => void
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Main function
+// 共用：POST 一个 SSE 端点，把每个 data 事件解析成对象交给 onEvent
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * 向 `/api/generate/stream` 发起 SSE 请求，解析每个事件并触发回调。
- *
- * @param payload   与后端 GenerateSheetRequest 对应的请求体
- * @param getToken  Clerk useAuth().getToken（放 Authorization: Bearer）
- * @param callbacks SSE 事件回调集合
- * @param signal    AbortController.signal，用于取消流（可选）
- */
-export async function startStreaming(
-  payload: GenerateSheetRequest,
+async function streamSSE(
+  path: string,
+  body: unknown,
   getToken: TokenGetter,
-  callbacks: StreamCallbacks,
+  handlers: { onEvent: (event: unknown) => void; onDone: () => void; onError: (err: Error) => void },
   signal?: AbortSignal,
 ): Promise<void> {
-  const { onMeta, onSection, onDone, onError } = callbacks
+  const { onEvent, onDone, onError } = handlers
 
   let response: Response
   try {
-    response = await fetch(`${API_URL}/api/generate/stream`, {
+    response = await fetch(`${API_URL}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(await authHeaders(getToken)),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       signal,
     })
   } catch (err) {
@@ -106,7 +116,6 @@ export async function startStreaming(
           return
         }
 
-        // 解析 JSON
         let parsed: unknown
         try {
           parsed = JSON.parse(jsonStr)
@@ -115,19 +124,7 @@ export async function startStreaming(
           console.warn('[streaming] Failed to parse SSE data:', jsonStr)
           continue
         }
-
-        // 根据 _type 字段分发到不同回调
-        if (
-          typeof parsed === 'object' &&
-          parsed !== null &&
-          '_type' in parsed &&
-          (parsed as Record<string, unknown>)['_type'] === 'meta'
-        ) {
-          onMeta(parsed as StreamMetaEvent)
-        } else {
-          // section 事件（无 _type 字段）
-          onSection(parsed as StreamSectionEvent)
-        }
+        if (typeof parsed === 'object' && parsed !== null) onEvent(parsed)
       }
     }
 
@@ -144,4 +141,60 @@ export async function startStreaming(
   } finally {
     reader.releaseLock()
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 向 `/api/generate/stream` 发起 SSE 请求，解析每个事件并触发回调。
+ *
+ * @param payload   与后端 GenerateSheetRequest 对应的请求体
+ * @param getToken  Clerk useAuth().getToken（放 Authorization: Bearer）
+ * @param callbacks SSE 事件回调集合
+ * @param signal    AbortController.signal，用于取消流（可选）
+ */
+export async function startStreaming(
+  payload: GenerateSheetRequest,
+  getToken: TokenGetter,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const { onMeta, onSection, onDone, onError } = callbacks
+  await streamSSE('/api/generate/stream', payload, getToken, {
+    onEvent: (event) => {
+      // 根据 _type 字段分发：meta 事件带 _type，section 事件没有
+      if ((event as Record<string, unknown>)['_type'] === 'meta') {
+        onMeta(event as StreamMetaEvent)
+      } else {
+        onSection(event as StreamSectionEvent)
+      }
+    },
+    onDone,
+    onError,
+  }, signal)
+}
+
+/**
+ * 8-2：向 `/api/generate/regenerate` 发起 SSE 请求。只推送被重写的 section（带 _index），不推送 meta。
+ * 后端不读也不写生成缓存，每次都是真实生成。
+ */
+export async function startRegenerateStreaming(
+  payload: RegenerateSectionsRequest,
+  getToken: TokenGetter,
+  callbacks: RegenerateCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const { onSection, onDone, onError } = callbacks
+  await streamSSE('/api/generate/regenerate', payload, getToken, {
+    onEvent: (event) => {
+      const e = event as Partial<StreamRegeneratedSectionEvent>
+      if (typeof e._index === 'number' && Array.isArray(e.items)) {
+        onSection(e as StreamRegeneratedSectionEvent)
+      }
+    },
+    onDone,
+    onError,
+  }, signal)
 }

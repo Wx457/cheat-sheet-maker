@@ -151,6 +151,21 @@ body {
   .sheet-interactive:hover { outline: 1px dashed #93c5fd; outline-offset: 1px; }
   .sheet-dragging { opacity: 0.4; }
 
+  /* 8-2 部分重新生成：选择模式 / 重写中。同样只用 outline / 背景，不改变测量高度 */
+  .sheet-selecting .sheet-drag-handle,
+  .sheet-selecting .sheet-delete { display: none; }
+  .sheet-selecting .sheet-interactive:hover { outline: none; }
+  .sheet-selectable { cursor: pointer; border-radius: 2px; }
+  .sheet-selectable:hover { background: #f4f4f5; outline: 1px dashed #a1a1aa; outline-offset: 1px; }
+  .sheet-selected,
+  .sheet-selected:hover { background: #dbeafe; outline: 1.5px solid #3b82f6; outline-offset: 1px; }
+  .sheet-regenerating { cursor: progress; border-radius: 2px; animation: sheet-regen-pulse 1.4s ease-in-out infinite; }
+  .sheet-regenerating .sheet-interactive:hover { outline: none; }
+  @keyframes sheet-regen-pulse {
+    0%, 100% { background: #fef3c7; }
+    50% { background: #fde68a; }
+  }
+
   .sheet-drag-handle {
     position: absolute;
     left: -14px;

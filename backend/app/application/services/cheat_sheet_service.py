@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
+from contextlib import aclosing
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import AsyncIterator, List, Optional
 
 import cohere as _cohere
 
@@ -16,6 +18,7 @@ from app.schemas import (
     ExamType,
     GenerateSheetRequest,
     OutlineResponse,
+    RegenerateSectionsRequest,
     TopicInput,
 )
 from app.domain.utils.cleaner import (
@@ -236,11 +239,7 @@ class CheatSheetService:
         """
         流式 Cheat Sheet 生成器，供 SSE 端点使用。
         Yields SSE 格式字符串（已含 "data: ...\n\n" 前缀）。
-
         """
-        import asyncio
-        import json as _json
-
         # 1) budget
         if not request_data.selected_topics:
             default_topics = [TopicInput(title="General Topics", relevance_score=1.0)]
@@ -266,27 +265,9 @@ class CheatSheetService:
         course_id = str(request_data.course_id) if request_data.course_id else None
 
         if request_data.selected_topics:
-            search_tasks = [
-                self.rag_service.search_context(
-                    topic.title, user_id=user_id, k=10, course_id=course_id
-                )
-                for topic in request_data.selected_topics
-            ]
-            all_results = await asyncio.gather(*search_tasks)
-
-            seen = set()
-            for topic, results in zip(request_data.selected_topics, all_results):
-                if results:
-                    results = await self._rerank_chunks(topic.title, results, top_n=3)
-                    rag_context_str += f"\n--- Context for topic '{topic.title}' ---\n"
-                    for r in results:
-                        h = hash((r.get("content") or "").strip())
-                        if h in seen:
-                            continue
-                        seen.add(h)
-                        rag_context_str += f"Source: {r['source']}\n"
-                        rag_context_str += f"Content: {r['content']}\n"
-                        rag_context_str += "---------------------------------------\n"
+            rag_context_str = await self._topic_context(
+                [t.title for t in request_data.selected_topics], user_id, course_id
+            )
         else:
             archetype = request_data.archetype.value if request_data.archetype else "general"
             query = request_data.user_context or archetype or "general knowledge"
@@ -304,20 +285,8 @@ class CheatSheetService:
                     rag_context_str += "---------------------------------------\n"
 
         # 3) prompt
-        exam_type_context = {
-            ExamType.quiz: "Quiz",
-            ExamType.midterm: "Midterm",
-            ExamType.final: "Final",
-        }.get(request_data.exam_type, "Final")
-        syllabus_instruction = ""
-        if request_data.syllabus:
-            cleaned_syllabus = clean_raw_text(request_data.syllabus)
-            syllabus_instruction = f"""
-            [Syllabus Filter Instruction]
-            User provided the following syllabus as content filtering guide:
-            {cleaned_syllabus}
-            [End of Syllabus Filter Instruction]
-            """
+        exam_type_context = _exam_type_context(request_data.exam_type)
+        syllabus_instruction = _syllabus_instruction(request_data.syllabus)
         topics_str = (
             "\n".join([f"- {t.title}" for t in request_data.selected_topics])
             if request_data.selected_topics
@@ -335,14 +304,131 @@ class CheatSheetService:
             selected_topics_str=topics_str,
         )
 
-        # --- 步骤 4：流式 LLM 调用 + NDJSON 解析 ---
-        buffer = ""
+        # 4) 流式 LLM 调用 + 解析：每拿到一个完整 meta / section 就推送
+        async with aclosing(self._stream_llm_objects(prompt)) as objects:
+            async for obj in objects:
+                yield f"data: {json.dumps(obj)}\n\n"
 
-        # generate_text_stream 是同步生成器：生产者在线程池里跑，
-        # 每拿到一个 chunk 就通过 call_soon_threadsafe 推入 asyncio.Queue，
-        # 主协程边取边解析边 yield，不等整份生成结束。
-        import threading
+        yield "data: [DONE]\n\n"
 
+    async def stream_regenerated_sections(
+        self,
+        request_data: RegenerateSectionsRequest,
+        user_id: str,
+    ):
+        """
+        8-2 部分重新生成：只重写 selected_indices 指向的 section，其余 section 作为上下文。
+        Yields SSE 字符串；每个 section 事件带 `_index`（它要替换的原位置，即请求里 sections 的下标），
+        前端按位置替换，不按标题归并（重写后标题可能变化）。不推送 meta。
+        """
+        params = request_data.params
+        sections = request_data.sections
+        selected = request_data.selected_indices
+        course_id = str(params.course_id) if params.course_id else None
+
+        # 1) 预算：按整份小抄的 section 分配（沿用 BudgetRule），取被选中的那几节
+        relevance = {
+            t.title.strip().lower(): t.relevance_score for t in (params.selected_topics or [])
+        }
+        all_topics = [
+            TopicInput(
+                title=s.title or f"Section {i + 1}",
+                relevance_score=relevance.get(s.title.strip().lower(), 0.8),
+            )
+            for i, s in enumerate(sections)
+        ]
+        budget_map = BudgetRule.calculate(params.page_limit.value, all_topics)
+        targets = [budget_map.get(all_topics[i].title, 3) for i in selected]
+
+        # 2) RAG：只为被选中的 section 检索 + rerank
+        rag_context_str = await self._topic_context(
+            [all_topics[i].title for i in selected], user_id, course_id
+        )
+
+        # 3) prompt
+        prompt = CheatSheetPrompts.render_regenerate_prompt(
+            exam_type_context=_exam_type_context(params.exam_type),
+            rag_context_str=rag_context_str,
+            syllabus_instruction=_syllabus_instruction(params.syllabus),
+            sheet_title=request_data.title or "",
+            kept_sections_str=_format_kept_sections(sections, set(selected)),
+            rewrite_plan=_format_rewrite_plan(sections, selected, targets),
+            section_count=len(selected),
+            total_items=sum(targets),
+            page_limit=params.page_limit.value,
+            academic_level=params.academic_level.value,
+            archetype=params.archetype.value if params.archetype else "general",
+            instruction=request_data.instruction,
+        )
+
+        # 4) 第 n 个输出的 section 替换第 n 个被选中的位置；多出的丢弃
+        produced = 0
+        async with aclosing(self._stream_llm_objects(prompt)) as objects:
+            async for obj in objects:
+                if obj.get("_type") == "meta":
+                    continue
+                if produced >= len(selected):
+                    logger.warning("Regenerate: LLM returned more sections than requested; dropped")
+                    break
+                event = {
+                    "_index": selected[produced],
+                    "title": obj.get("title", ""),
+                    "items": obj.get("items", []),
+                }
+                produced += 1
+                yield f"data: {json.dumps(event)}\n\n"
+
+        if produced < len(selected):
+            logger.warning(
+                "Regenerate: LLM returned %d of %d requested sections", produced, len(selected)
+            )
+        yield "data: [DONE]\n\n"
+
+    async def _topic_context(
+        self, titles: List[str], user_id: str, course_id: Optional[str]
+    ) -> str:
+        """每个 topic 检索 k=10 → rerank 取 3，跨 topic 去重，拼成 prompt 里的 RAG 上下文。"""
+        all_results = await asyncio.gather(
+            *[
+                self.rag_service.search_context(title, user_id=user_id, k=10, course_id=course_id)
+                for title in titles
+            ]
+        )
+        context = ""
+        seen = set()
+        for title, results in zip(titles, all_results):
+            if not results:
+                continue
+            results = await self._rerank_chunks(title, results, top_n=3)
+            context += f"\n--- Context for topic '{title}' ---\n"
+            for r in results:
+                h = hash((r.get("content") or "").strip())
+                if h in seen:
+                    continue
+                seen.add(h)
+                context += f"Source: {r['source']}\n"
+                context += f"Content: {r['content']}\n"
+                context += "---------------------------------------\n"
+        return context
+
+    async def _stream_llm_objects(self, prompt: str) -> AsyncIterator[dict]:
+        """
+        流式调用 Gemini，逐个产出解析好的对象：meta（{"_type": "meta", ...}）或完整 section（title + items）。
+
+        generate_text_stream 是同步生成器：生产者在线程池里跑，
+        每拿到一个 chunk 就通过 call_soon_threadsafe 推入 asyncio.Queue，
+        主协程边取边解析边产出，不等整份生成结束。
+
+        从缓冲区里按花括号配平切出完整的顶层 JSON 对象（不按换行切分）。
+        prompt 要求 NDJSON（每行一个完整 section），但 Gemini 实际输出并不稳定，观察到过：
+          - 单行 NDJSON；多行缩进的对象；多个对象首尾相连；```json 围栏（结尾 ``` 可能粘在对象后）
+          - 「扁平格式」：section header 和每条 item 各自是一个对象
+              {"title": "EM Algorithm"}
+              {"type": "text", "content": "..."}
+          - LaTeX 单反斜杠（\\(、\\theta）
+        解析器将扁平格式的 items 归并到所属 section 后再产出，同时兼容完整格式（见 REPO.md §1）。
+        调用方用 contextlib.aclosing 包裹，保证客户端断开时 finally 立即执行、生产者线程停止。
+        """
         loop = asyncio.get_running_loop()
         chunk_queue: asyncio.Queue = asyncio.Queue()
         stop_event = threading.Event()  # 客户端断开时通知生产者提前退出
@@ -362,86 +448,68 @@ class CheatSheetService:
         # 不 await：队列创建后立即进入消费循环
         producer = loop.run_in_executor(None, _produce)
 
-        # 从队列取 chunk，在缓冲区里按花括号配平切出完整的顶层 JSON 对象（不按换行切分）。
-        # prompt 要求 NDJSON（每行一个完整 section），但 Gemini 实际输出并不稳定，观察到过：
-        #   - 单行 NDJSON；多行缩进的对象；多个对象首尾相连；```json 围栏（结尾 ``` 可能粘在对象后）
-        #   - 「扁平格式」：section header 和每条 item 各自是一个对象
-        #       {"title": "EM Algorithm"}
-        #       {"type": "text", "content": "..."}
-        #   - LaTeX 单反斜杠（\(、\theta）
-        # 解析器需将扁平格式的 items 归并到所属 section 后再 yield，同时兼容完整格式。
+        buffer = ""
         current_section: dict | None = None
 
-        def _try_yield_current():
-            """将当前 section（已收集好 items）序列化为 SSE 行并返回，供 caller yield。"""
-            if current_section is not None:
-                return f"data: {_json.dumps(current_section)}\n\n"
-            return None
-
-        def _drain_buffer():
-            """切出缓冲区中所有已完整的对象并处理，返回需要立即 yield 的 SSE 字符串列表。"""
-            nonlocal buffer
-            texts, buffer = extract_json_objects(buffer)
-            to_yield = []
-            for text in texts:
-                try:
-                    # 先修复 LaTeX 单反斜杠：否则整个 section 解析失败被丢弃，或公式被吞成制表符/换行。
-                    # strict=False 容忍字符串内的原始换行。
-                    obj = _json.loads(escape_latex_backslashes(text), strict=False)
-                except _json.JSONDecodeError:
-                    logger.warning("Dropped unparseable JSON object from LLM: %.200s", text)
-                    continue
-                to_yield.extend(_handle_object(obj))
-            return to_yield
-
-        def _handle_object(obj: dict):
+        def _handle_object(obj: dict) -> List[dict]:
             """
             根据结构分类：
-              - meta          → 直接 yield
-              - 完整格式（title + items）→ 先 yield 前一个 section，再 yield 本对象
-              - section header（有 title，无 type）→ 先 yield 前一个 section，开始新 section
+              - meta          → 直接产出
+              - 完整格式（title + items）→ 先产出前一个 section，再产出本对象
+              - section header（有 title，无 type）→ 先产出前一个 section，开始新 section
               - item（有 type + content）→ 追加到当前 section 的 items
               - {"sections": [...]} 包裹对象（prompt 禁止但可能出现）→ 逐个处理
             """
             nonlocal current_section
-            to_yield = []
+            out: List[dict] = []
 
             if isinstance(obj.get("sections"), list):
                 for section in obj["sections"]:
                     if isinstance(section, dict):
-                        to_yield.extend(_handle_object(section))
-                return to_yield
+                        out.extend(_handle_object(section))
+                return out
 
-            # ── meta 行 ────────────────────────────────────────────────
             if obj.get("_type") == "meta":
-                to_yield.append(f"data: {_json.dumps(obj)}\n\n")
-                return to_yield
+                out.append(obj)
+                return out
 
-            # ── 完整格式：title + items 在同一行 ────────────────────────
             if "title" in obj and "items" in obj:
-                ev = _try_yield_current()
-                if ev:
-                    to_yield.append(ev)
+                if current_section is not None:
+                    out.append(current_section)
                 current_section = None
-                to_yield.append(f"data: {_json.dumps(obj)}\n\n")
-                return to_yield
+                out.append(obj)
+                return out
 
-            # ── section header（扁平格式）：有 title，无 type ────────────
             if "title" in obj and "type" not in obj:
-                ev = _try_yield_current()
-                if ev:
-                    to_yield.append(ev)
+                if current_section is not None:
+                    out.append(current_section)
                 current_section = {"title": obj["title"], "items": []}
-                return to_yield
+                return out
 
-            # ── item（扁平格式）：有 type + content ─────────────────────
             if "type" in obj and "content" in obj:
+                # 若没有当前 section，作为孤儿 item 忽略
                 if current_section is not None:
                     current_section["items"].append(obj)
-                # 若没有当前 section，作为孤儿 item 忽略
-                return to_yield
+                return out
 
-            return to_yield
+            return out
+
+        def _drain_buffer() -> List[dict]:
+            """切出缓冲区中所有已完整的对象并处理，返回需要立即产出的对象。"""
+            nonlocal buffer
+            texts, buffer = extract_json_objects(buffer)
+            out: List[dict] = []
+            for text in texts:
+                try:
+                    # 先修复 LaTeX 单反斜杠：否则整个 section 解析失败被丢弃，或公式被吞成制表符/换行。
+                    # strict=False 容忍字符串内的原始换行。
+                    obj = json.loads(escape_latex_backslashes(text), strict=False)
+                except json.JSONDecodeError:
+                    logger.warning("Dropped unparseable JSON object from LLM: %.200s", text)
+                    continue
+                if isinstance(obj, dict):
+                    out.extend(_handle_object(obj))
+            return out
 
         try:
             while True:
@@ -451,8 +519,8 @@ class CheatSheetService:
                 if isinstance(chunk_text, Exception):
                     raise chunk_text
                 buffer += chunk_text
-                for sse in _drain_buffer():
-                    yield sse
+                for obj in _drain_buffer():
+                    yield obj
         finally:
             # 正常结束 / 客户端断开（GeneratorExit）/ 异常，都让生产者线程尽快停止
             stop_event.set()
@@ -462,9 +530,75 @@ class CheatSheetService:
             # 流结束时仍有未闭合的对象（输出被截断，如超出 max tokens）
             logger.warning("LLM stream ended with an incomplete JSON object: %.200s", buffer)
 
-        # 最后 flush 尚未 yield 的 section
-        ev = _try_yield_current()
-        if ev:
-            yield ev
+        # 最后 flush 尚未产出的 section（扁平格式）
+        if current_section is not None:
+            yield current_section
 
-        yield "data: [DONE]\n\n"
+
+# ── prompt 片段（整份生成与部分重新生成共用） ─────────────────────────────────
+
+# 未被选中的 section 作为上下文时的长度上限（防止 prompt 过长）
+_KEPT_ITEM_CHARS = 200
+_KEPT_TOTAL_CHARS = 6000
+# 被选中 section 的旧内容（供参考）每条的长度上限
+_OLD_ITEM_CHARS = 300
+
+
+def _exam_type_context(exam_type: ExamType) -> str:
+    return {
+        ExamType.quiz: "Quiz",
+        ExamType.midterm: "Midterm",
+        ExamType.final: "Final",
+    }.get(exam_type, "Final")
+
+
+def _syllabus_instruction(syllabus: Optional[str]) -> str:
+    if not syllabus:
+        return ""
+    cleaned_syllabus = clean_raw_text(syllabus)
+    return f"""
+            [Syllabus Filter Instruction]
+            User provided the following syllabus as content filtering guide:
+            {cleaned_syllabus}
+            [End of Syllabus Filter Instruction]
+            """
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _section_label(section, index: int) -> str:
+    return section.title or f"Section {index + 1}"
+
+
+def _format_kept_sections(sections, selected: set) -> str:
+    """未被选中的 section：标题 + 截断后的条目，只供模型对齐风格、避免重复。"""
+    parts: List[str] = []
+    used = 0
+    for i, s in enumerate(sections):
+        if i in selected:
+            continue
+        lines = [f"## {_section_label(s, i)}"]
+        lines += [f"- ({it.type}) {_clip(it.content, _KEPT_ITEM_CHARS)}" for it in s.items]
+        block = "\n".join(lines)
+        if used + len(block) > _KEPT_TOTAL_CHARS:
+            parts.append(f"## {_section_label(s, i)} (items omitted)")
+            continue
+        parts.append(block)
+        used += len(block)
+    return "\n\n".join(parts) if parts else "(none — every section is being rewritten)"
+
+
+def _format_rewrite_plan(sections, selected: List[int], targets: List[int]) -> str:
+    """被选中的 section：输出顺序、目标条目数，以及旧内容（只作参考，不要照抄）。"""
+    parts: List[str] = []
+    for n, (i, target) in enumerate(zip(selected, targets), start=1):
+        s = sections[i]
+        lines = [f"{n}. {_section_label(s, i)} (Target: ~{target} items)"]
+        if s.items:
+            lines.append("   Previous version (to be replaced):")
+            lines += [f"   - ({it.type}) {_clip(it.content, _OLD_ITEM_CHARS)}" for it in s.items]
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)

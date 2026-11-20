@@ -14,9 +14,14 @@
  *   - scope：插件传入的 URL 参数（不含 sheetId），保证不会把 A 小抄恢复到 B 页面
  *   - sheetId：首次保存失败时两边都是 null；之后的 PUT 失败时两边是同一个 id
  *   - userId：同一标签页里换了 Clerk 账号时不恢复别人的草稿
+ *
+ * 8-2：重新生成出的新版本在首次保存前 sheetId 为 null，而 URL 里仍是父版本的 sheetId。
+ * 这种草稿带 pending（父版本 id、generation_params、课程），URL sheetId = 父版本时也算对得上，
+ * 恢复后自动保存会继续把它 POST 成新版本。
  */
 
-import type { ContentItem } from '@/types'
+import type { ContentItem, GenerationParams } from '@/types'
+import type { PendingVersion } from '@/stores/cheatSheetStore'
 
 const STORAGE_KEY = 'cheatsheet-draft:v1'
 
@@ -27,6 +32,8 @@ export interface Draft {
   title: string
   sections: { title: string; items: ContentItem[] }[]
   savedAt: number
+  /** 8-2：尚未保存的重新生成版本 */
+  pending?: { version: PendingVersion; generationParams: GenerationParams | null; courseId: string | null }
 }
 
 /** URL 参数（去掉 sheetId，按 key 排序）→ 稳定的 scope 字符串 */
@@ -72,5 +79,8 @@ export function draftMatches(
   sheetId: string | null,
   userId: string,
 ): boolean {
-  return draft.scope === scope && (draft.sheetId ?? null) === (sheetId ?? null) && draft.userId === userId
+  if (draft.scope !== scope || draft.userId !== userId) return false
+  if ((draft.sheetId ?? null) === (sheetId ?? null)) return true
+  // 尚未保存的重新生成版本：URL 里还是父版本的 sheetId
+  return !draft.sheetId && !!sheetId && draft.pending?.version.parentSheetId === sheetId
 }
