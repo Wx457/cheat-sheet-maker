@@ -11,7 +11,8 @@
  *
  * 执行流程：
  *   1. 匹配当前 hostname → 取 scrollSelector 和 contentSelectors
- *   2. 尝试滚动 + 按 contentSelectors 收集（策略 A）
+ *   2. 从顶部逐步滚到底，每一步都按 contentSelectors 收集并去重累积（策略 A；
+ *      虚拟列表会卸载视口外的消息，只在滚到底后收集会丢掉前面的内容）
  *   3. 若策略 A 无结果 → TreeWalker 全文提取（策略 B）
  *   4. 若 B 也无结果 → document.body.innerText 兜底
  */
@@ -27,10 +28,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const PLATFORM_CONFIGS = [
   {
-    // ChatGPT (chat.openai.com)
+    // ChatGPT（现域名 chatgpt.com，旧域名 chat.openai.com 会跳转过去）
     // scrollSelectors: 有序数组，逐一尝试直到找到可滚动元素
     // 新 UI(2025): data-app-shell-* 属性替代了旧的 [data-scroll-root]
-    hostMatch: 'chat.openai.com',
+    hostMatch: ['chatgpt.com', 'chat.openai.com'],
     scrollSelectors: [
       '[data-app-shell-focus-area="main"]',          // 新 UI 焦点区（最内、最可能滚动）
       '[data-app-shell-main-content-layout]',        // 新 UI 内容视口
@@ -112,7 +113,9 @@ const PLATFORM_CONFIGS = [
 function getPlatformConfig() {
   const hostname = window.location.hostname
   for (const cfg of PLATFORM_CONFIGS) {
-    if (cfg.hostMatch && hostname.includes(cfg.hostMatch)) return cfg
+    if (!cfg.hostMatch) continue
+    const hosts = Array.isArray(cfg.hostMatch) ? cfg.hostMatch : [cfg.hostMatch]
+    if (hosts.some((h) => hostname.includes(h))) return cfg
   }
   // 通用 fallback（hostMatch === null）
   return PLATFORM_CONFIGS[PLATFORM_CONFIGS.length - 1]
@@ -120,38 +123,54 @@ function getPlatformConfig() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 策略 A：按配置表的 contentSelectors 收集元素文本
-// 按 selectors 优先级尝试，第一个有结果的胜出
+// 按 selectors 优先级尝试，第一个有结果的胜出，之后锁定该 selector。
+//
+// 边滚边收：ChatGPT 等页面把视口外的消息从 DOM 卸载（虚拟列表），滚到底再收集
+// 只能拿到最后几屏。所以每滚一步收一次，按首次出现的顺序去重累积。
 // ─────────────────────────────────────────────────────────────────────────────
 
-function collectWithSelectors(selectors, wrapLabel) {
-  for (const selector of selectors) {
-    let elements
-    try {
-      elements = document.querySelectorAll(selector)
-    } catch {
-      // 无效选择器（如 Web Component 名），跳过
-      continue
-    }
+function createCollector(selectors, wrapLabel) {
+  const seen = new Set()
+  const texts = []
+  let lockedSelector = null
 
-    if (elements.length === 0) continue
-
-    const fragments = []
-    const seen = new Set()
-
-    elements.forEach((el, i) => {
-      const text = el.innerText?.trim() ?? ''
-      if (text.length > 20 && !seen.has(text)) {
-        seen.add(text)
-        fragments.push(`=== ${wrapLabel} ${i + 1} ===\n\n${text}`)
+  function collectOnce() {
+    const candidates = lockedSelector ? [lockedSelector] : selectors
+    for (const selector of candidates) {
+      let elements
+      try {
+        elements = document.querySelectorAll(selector)
+      } catch {
+        // 无效选择器（如 Web Component 名），跳过
+        continue
       }
-    })
-
-    if (fragments.length > 0) {
-      console.log(`[content.js] Strategy A matched: "${selector}" → ${fragments.length} blocks`)
-      return fragments.join('\n\n')
+      let matched = false
+      elements.forEach((el) => {
+        const text = el.innerText?.trim() ?? ''
+        if (text.length <= 20) return
+        matched = true
+        if (!seen.has(text)) {
+          seen.add(text)
+          texts.push(text)
+        }
+      })
+      if (matched) {
+        if (!lockedSelector) {
+          lockedSelector = selector
+          console.log(`[content.js] Strategy A matched: "${selector}"`)
+        }
+        return
+      }
     }
   }
-  return null  // 所有 selector 均无结果
+
+  function result() {
+    if (texts.length === 0) return null  // 所有 selector 均无结果
+    console.log(`[content.js] Strategy A collected ${texts.length} blocks`)
+    return texts.map((t, i) => `=== ${wrapLabel} ${i + 1} ===\n\n${t}`).join('\n\n')
+  }
+
+  return { collectOnce, result }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -282,16 +301,18 @@ async function scrollAndCollect() {
     if (scrollEl) console.log('[content.js] Scroll container found via findLargestScrollable()')
   }
 
-  // ── 2. 执行滚动（确保懒加载内容全部渲染） ────────────────────────────────────
+  // ── 2. 从顶部逐步滚到底，每一步都按策略 A 收集一次（见 createCollector） ────────
+  const collector = createCollector(config.contentSelectors, config.wrapLabel)
   if (scrollEl) {
-    await doScroll(scrollEl)
+    await doScroll(scrollEl, collector.collectOnce)
   } else {
     // 没有滚动容器：滚动整个页面
-    await scrollPage()
+    await scrollPage(collector.collectOnce)
   }
+  collector.collectOnce()
 
-  // ── 3. 策略 A：按配置表选择器收集 ────────────────────────────────────────────
-  const strategyAResult = collectWithSelectors(config.contentSelectors, config.wrapLabel)
+  // ── 3. 策略 A：按配置表选择器收集的结果 ──────────────────────────────────────
+  const strategyAResult = collector.result()
   if (strategyAResult && strategyAResult.length > 100) {
     return {
       title: document.title || window.location.href,
@@ -345,7 +366,7 @@ function findLargestScrollable() {
 // 辅助：在指定元素内滚动（逐步，触发懒加载）
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function doScroll(el) {
+async function doScroll(el, onStep) {
   el.scrollTo({ top: 0, behavior: 'instant' })
   await sleep(800)
 
@@ -354,6 +375,8 @@ async function doScroll(el) {
   let stuckCount = 0
 
   while (true) {
+    onStep()
+
     const isAtBottom =
       Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 50
 
@@ -377,12 +400,14 @@ async function doScroll(el) {
 // 辅助：滚动整个页面（无独立滚动容器时）
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function scrollPage() {
+async function scrollPage(onStep) {
   window.scrollTo({ top: 0, behavior: 'instant' })
   await sleep(500)
 
   let lastY = -1
   while (true) {
+    onStep()
+
     const isAtBottom =
       Math.ceil(window.scrollY + window.innerHeight) >= document.body.scrollHeight - 50
     if (isAtBottom || window.scrollY === lastY) break

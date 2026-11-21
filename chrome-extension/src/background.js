@@ -80,6 +80,32 @@ async function getSession() {
   return { clerk, token }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录态推送：webapp 登录 / 登出 → 立刻通知 side panel
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// side panel 一直开着时不会触发 visibilitychange（切换浏览器标签不影响侧栏可见性），所以不能只靠
+// panel 自己在打开时查询。Clerk 在 webapp 域名上写的 `__client_uat`（dev 实例还有带后缀的
+// `__client_uat_<suffix>`）只在登录 / 登出时变化（登出时值为 0），而 `__session` 每 ~60s 刷新一次，
+// 太吵。所以只监听前者：变化时丢掉缓存的 client，再广播 auth:changed，panel 收到后重新查询。
+// 同一次登录会连续触发「删除旧值 + 写入新值」等多个事件，防抖合并成一次。
+const SYNC_HOST_DOMAIN = new URL(CLERK_SYNC_HOST).hostname
+let authChangedTimer = null
+
+function isSyncHostAuthCookie(cookie) {
+  return cookie.domain.replace(/^\./, '') === SYNC_HOST_DOMAIN && cookie.name.startsWith('__client_uat')
+}
+
+chrome.cookies.onChanged.addListener(({ cookie }) => {
+  if (!isSyncHostAuthCookie(cookie)) return
+  clearTimeout(authChangedTimer)
+  authChangedTimer = setTimeout(() => {
+    clerkPromise = null
+    // 没有打开的 panel 时 sendMessage 会 reject（Receiving end does not exist），忽略即可
+    chrome.runtime.sendMessage({ type: 'auth:changed' }).catch(() => {})
+  }, 300)
+})
+
 const handlers = {
   // popup 点了 Sign out：丢掉缓存的 client，下次查询必定重新读 cookie + 问 Clerk
   'auth:reset': async () => {

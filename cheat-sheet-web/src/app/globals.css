@@ -157,8 +157,9 @@ body {
   .sheet-selecting .sheet-interactive:hover { outline: none; }
   .sheet-selectable { cursor: pointer; border-radius: 2px; }
   .sheet-selectable:hover { background: #f4f4f5; outline: 1px dashed #a1a1aa; outline-offset: 1px; }
+  /* 选中：插件主题色 #0ABAB5，底色 20% 透明度 */
   .sheet-selected,
-  .sheet-selected:hover { background: #dbeafe; outline: 1.5px solid #3b82f6; outline-offset: 1px; }
+  .sheet-selected:hover { background: rgb(10 186 181 / 0.2); outline: 1.5px solid #0ABAB5; outline-offset: 1px; }
   .sheet-regenerating { cursor: progress; border-radius: 2px; animation: sheet-regen-pulse 1.4s ease-in-out infinite; }
   .sheet-regenerating .sheet-interactive:hover { outline: none; }
   @keyframes sheet-regen-pulse {

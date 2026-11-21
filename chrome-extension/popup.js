@@ -138,27 +138,41 @@ async function linkAnonIfNeeded(user) {
   }
 }
 
-// popup 打开 / 回到可见时调用；并发调用合并为一次
+// popup 打开 / 回到可见 / service worker 推送 auth:changed 时调用。
+// 并发调用合并为一次；进行中又有新请求时，结束后再查一轮（期间登录态可能已经变了）
 let authRefreshPromise = null
+let authRefreshAgain = false
 
 function refreshAuthState() {
-  if (!authRefreshPromise) {
-    authRefreshPromise = (async () => {
-      let user = null
-      try {
-        user = await sendAuthMessage('auth:getUser')
-      } catch (err) {
-        renderAuthBar(null)
-        showNotice(err.message || String(err), 'error', 7000)
-        return
-      }
-      renderAuthBar(user)
-      if (!user) { renderCourseSelect(); return }
-      await linkAnonIfNeeded(user)
-      await loadCourses()
-      await syncChunkCountFromServer()
-    })().finally(() => { authRefreshPromise = null })
+  if (authRefreshPromise) {
+    authRefreshAgain = true
+    return authRefreshPromise
   }
+  authRefreshPromise = (async () => {
+    let user = null
+    try {
+      user = await sendAuthMessage('auth:getUser')
+    } catch (err) {
+      renderAuthBar(null)
+      showNotice(err.message || String(err), 'error', 7000)
+      return
+    }
+    renderAuthBar(user)
+    if (!user) {
+      courses = []   // 登出后不再显示上一个账号的课程
+      renderCourseSelect()
+      return
+    }
+    await linkAnonIfNeeded(user)
+    await loadCourses()
+    await syncChunkCountFromServer()
+  })().finally(() => {
+    authRefreshPromise = null
+    if (authRefreshAgain) {
+      authRefreshAgain = false
+      refreshAuthState()
+    }
+  })
   return authRefreshPromise
 }
 
@@ -1087,11 +1101,15 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('change', buildHeaderSummary)
   })
 
-  // Auth bar：在 webapp 登录后切回 side panel 时重新查询登录态
+  // Auth bar：side panel 重新可见时，或 service worker 发现 webapp 登录 / 登出时（auth:changed），
+  // 重新查询登录态
   document.getElementById('btnSignIn')?.addEventListener('click', openSignIn)
   document.getElementById('btnSignOut')?.addEventListener('click', openSignOut)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshAuthState()
+  })
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === 'auth:changed') refreshAuthState()
   })
 
   // Restore state from local storage, then check auth (link-anon + sync from server)
