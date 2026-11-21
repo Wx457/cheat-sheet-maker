@@ -106,7 +106,18 @@ class FakeSupabase:
 
     def list_course_sheets(self, user_id, course_id):
         rows = [
-            {k: s[k] for k in ("id", "title", "version", "origin", "parent_sheet_id", "created_at", "updated_at")}
+            {
+                k: s[k]
+                for k in (
+                    "id",
+                    "title",
+                    "version",
+                    "origin",
+                    "parent_sheet_id",
+                    "created_at",
+                    "updated_at",
+                )
+            }
             for s in self.sheets.values()
             if s["user_id"] == user_id and s["course_id"] == course_id
         ]
@@ -124,7 +135,11 @@ class FakeSupabase:
         origin="generate",
         parent_sheet_id=None,
     ):
-        in_course = [s for s in self.sheets.values() if s["user_id"] == user_id and s["course_id"] == course_id]
+        in_course = [
+            s
+            for s in self.sheets.values()
+            if s["user_id"] == user_id and s["course_id"] == course_id
+        ]
         latest = max(in_course, key=lambda s: s["version"], default=None)
         if (
             latest

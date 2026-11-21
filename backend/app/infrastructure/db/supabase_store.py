@@ -160,9 +160,11 @@ class SupabaseStore:
         name = DEFAULT_COURSE_NAME
         for attempt in range(3):
             try:
-                return courses.insert(
-                    {"user_id": user_id, "name": name, "is_default": True}
-                ).execute().data[0]
+                return (
+                    courses.insert({"user_id": user_id, "name": name, "is_default": True})
+                    .execute()
+                    .data[0]
+                )
             except APIError as exc:
                 if not _is_unique_violation(exc):
                     raise

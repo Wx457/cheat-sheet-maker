@@ -28,7 +28,6 @@ app.include_router(auth_router, tags=["Auth"])
 app.include_router(courses_router, tags=["Courses"])
 
 
-
 @app.get("/health")
 async def health() -> dict:
     checks: dict[str, str] = {"api": "ok"}

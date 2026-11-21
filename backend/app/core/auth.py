@@ -69,7 +69,11 @@ async def get_current_user_id(request: Request) -> str:
     if not user_id:
         logger.warning(
             "auth rejected %s %s: reason=%s message=%s claims=%s",
-            request.method, request.url.path, state.reason, state.message, _unverified_claims(request),
+            request.method,
+            request.url.path,
+            state.reason,
+            state.message,
+            _unverified_claims(request),
         )
         raise HTTPException(
             status_code=401,

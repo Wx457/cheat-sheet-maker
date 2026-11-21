@@ -18,7 +18,10 @@ from fake_redis import FakeRedis
 
 META = {"_type": "meta", "title": "Linear Algebra"}
 SECTION = {"title": "Eigenvalues", "items": [{"type": "formula", "content": "Av = \\lambda v"}]}
-PAYLOAD = {"page_limit": "1_page", "selected_topics": [{"title": "Eigenvalues", "relevance_score": 0.9}]}
+PAYLOAD = {
+    "page_limit": "1_page",
+    "selected_topics": [{"title": "Eigenvalues", "relevance_score": 0.9}],
+}
 
 
 class FakeGemini:
@@ -70,7 +73,9 @@ def test_cache_key_is_deterministic_and_covers_all_content_fields():
     k = make_cache_key("u1", base, "m")
     assert k == make_cache_key("u1", dict(reversed(list(base.items()))), "m")
     assert k != make_cache_key("u2", base, "m")
-    assert k != make_cache_key("u1", {**base, "selected_topics": [{"title": "B", "relevance_score": 1.0}]}, "m")
+    assert k != make_cache_key(
+        "u1", {**base, "selected_topics": [{"title": "B", "relevance_score": 1.0}]}, "m"
+    )
     assert k != make_cache_key("u1", {**base, "syllabus": "ch 1-3"}, "m")
     assert k != make_cache_key("u1", base, "other-model")
 
@@ -97,7 +102,10 @@ def test_different_topics_or_users_do_not_share_cache(monkeypatch):
     client = make_app(monkeypatch, service)
 
     generate(client)
-    other_topics = {**PAYLOAD, "selected_topics": [{"title": "Determinants", "relevance_score": 0.9}]}
+    other_topics = {
+        **PAYLOAD,
+        "selected_topics": [{"title": "Determinants", "relevance_score": 0.9}],
+    }
     assert generate(client, payload=other_topics).headers["X-Cache"] == "MISS"
     assert generate(client, user="user-2").headers["X-Cache"] == "MISS"
     assert service.calls == 3
@@ -160,11 +168,15 @@ class FakeIngestion:
 def test_ingest_invalidates_only_that_users_cache(monkeypatch):
     service = StreamingService()
     client = make_app(monkeypatch, service)
-    monkeypatch.setattr(rag_api.IngestionService, "default", classmethod(lambda cls: FakeIngestion()))
+    monkeypatch.setattr(
+        rag_api.IngestionService, "default", classmethod(lambda cls: FakeIngestion())
+    )
 
     generate(client, user="user-1")
     generate(client, user="user-2")
-    res = client.post("/api/rag/ingest", headers=bearer("user-1"), json={"text": "new notes", "source": "s"})
+    res = client.post(
+        "/api/rag/ingest", headers=bearer("user-1"), json={"text": "new notes", "source": "s"}
+    )
     assert res.status_code == 200
 
     assert generate(client, user="user-1").headers["X-Cache"] == "MISS"
@@ -174,7 +186,9 @@ def test_ingest_invalidates_only_that_users_cache(monkeypatch):
 def test_deleting_chunks_invalidates_cache(monkeypatch):
     service = StreamingService()
     client = make_app(monkeypatch, service)
-    monkeypatch.setattr(rag_api.IngestionService, "default", classmethod(lambda cls: FakeIngestion()))
+    monkeypatch.setattr(
+        rag_api.IngestionService, "default", classmethod(lambda cls: FakeIngestion())
+    )
 
     generate(client)
     assert client.delete("/api/rag/chunks", headers=bearer("user-1")).status_code == 200
@@ -193,7 +207,12 @@ def test_link_anon_invalidates_when_chunks_moved(monkeypatch, moved, expected):
     monkeypatch.setattr(auth_api.AccountService, "default", classmethod(lambda cls: FakeAccount()))
 
     generate(client)
-    assert client.post("/api/auth/link-anon", headers=bearer("user-1"), json={"anon_id": "a"}).status_code == 200
+    assert (
+        client.post(
+            "/api/auth/link-anon", headers=bearer("user-1"), json={"anon_id": "a"}
+        ).status_code
+        == 200
+    )
     assert generate(client).headers["X-Cache"] == expected
 
 
@@ -213,7 +232,9 @@ def test_invalidate_all_removes_every_users_entries():
 
 
 def test_generation_still_works_when_redis_is_down(monkeypatch):
-    monkeypatch.setattr(redis_cache, "_cache", CheatSheetCache(FakeRedis(fail=True), ttl_seconds=60))
+    monkeypatch.setattr(
+        redis_cache, "_cache", CheatSheetCache(FakeRedis(fail=True), ttl_seconds=60)
+    )
     service = StreamingService()
     client = make_app(monkeypatch, service)
 

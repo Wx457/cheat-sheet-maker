@@ -107,7 +107,9 @@ async def get_chunk_count(
     用于前端同步显示最新的 chunks 数量。
     """
     try:
-        scope = await resolve_course_id(user_id, str(course_id) if course_id else None, use_default=False)
+        scope = await resolve_course_id(
+            user_id, str(course_id) if course_id else None, use_default=False
+        )
         ingestion = IngestionService.default()
         chunks_count = ingestion.rag_service.get_user_chunk_count(user_id, scope)
 
@@ -130,7 +132,9 @@ async def ingest_text(
     接收原始文本，切分后存入 Qdrant 向量库。
     """
     try:
-        course = await resolve_course(user_id, str(payload.course_id) if payload.course_id else None)
+        course = await resolve_course(
+            user_id, str(payload.course_id) if payload.course_id else None
+        )
         ingestion = IngestionService.default()
         ingest_result = await ingestion.process_text(
             text=payload.text,
@@ -169,7 +173,9 @@ async def search_context(
     根据查询文本，返回最相关的文档片段。
     """
     try:
-        scope = await resolve_course_id(user_id, str(payload.course_id) if payload.course_id else None)
+        scope = await resolve_course_id(
+            user_id, str(payload.course_id) if payload.course_id else None
+        )
         ingestion = IngestionService.default()
         results = await ingestion.rag_service.search_context(
             query=payload.query, user_id=user_id, k=payload.top_k, course_id=scope
@@ -247,7 +253,9 @@ async def delete_user_chunks(
     不影响其他用户数据。供 Chrome 插件的 "Clear" 按钮调用。
     """
     try:
-        scope = await resolve_course_id(user_id, str(course_id) if course_id else None, use_default=False)
+        scope = await resolve_course_id(
+            user_id, str(course_id) if course_id else None, use_default=False
+        )
         ingestion = IngestionService.default()
         deleted_count = await ingestion.delete_user_data(user_id, course_id=scope)
         return ClearResponse(status="success", deleted_count=int(deleted_count))

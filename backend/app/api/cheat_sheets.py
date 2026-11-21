@@ -48,7 +48,10 @@ async def create_cheat_sheet(
         else:
             course = await asyncio.to_thread(store.get_or_create_default_course, db_user_id)
         parent_id = str(payload.parent_sheet_id) if payload.parent_sheet_id else None
-        if parent_id and await asyncio.to_thread(store.get_cheat_sheet, db_user_id, parent_id) is None:
+        if (
+            parent_id
+            and await asyncio.to_thread(store.get_cheat_sheet, db_user_id, parent_id) is None
+        ):
             raise HTTPException(status_code=404, detail=f"父版本不存在: {parent_id}")
         row = await asyncio.to_thread(
             store.create_cheat_sheet,

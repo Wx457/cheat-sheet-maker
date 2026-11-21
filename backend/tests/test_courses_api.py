@@ -155,16 +155,22 @@ def test_other_users_course_is_404_everywhere(env):
     intruder = bearer("intruder")
 
     assert client.get(f"/api/courses/{cid}", headers=intruder).status_code == 404
-    assert client.patch(f"/api/courses/{cid}", headers=intruder, json={"name": "x"}).status_code == 404
+    assert (
+        client.patch(f"/api/courses/{cid}", headers=intruder, json={"name": "x"}).status_code == 404
+    )
     assert client.delete(f"/api/courses/{cid}", headers=intruder).status_code == 404
     assert client.get(f"/api/rag/chunks/count?course_id={cid}", headers=intruder).status_code == 404
-    assert client.post(
-        "/api/rag/ingest", headers=intruder, json={"text": "x", "source": "s", "course_id": cid}
-    ).status_code == 404
+    assert (
+        client.post(
+            "/api/rag/ingest", headers=intruder, json={"text": "x", "source": "s", "course_id": cid}
+        ).status_code
+        == 404
+    )
     assert client.post("/api/outline", headers=intruder, json={"course_id": cid}).status_code == 404
-    assert client.post(
-        "/api/generate/stream", headers=intruder, json={"course_id": cid}
-    ).status_code == 404
+    assert (
+        client.post("/api/generate/stream", headers=intruder, json={"course_id": cid}).status_code
+        == 404
+    )
 
 
 def test_detail_lists_versions_newest_first(env):
@@ -211,7 +217,9 @@ def test_ingest_tags_chunks_with_course(env):
     cid = new_course(client, "CS229").json()["id"]
 
     res = client.post(
-        "/api/rag/ingest", headers=bearer("user-1"), json={"text": "x", "source": "s", "course_id": cid}
+        "/api/rag/ingest",
+        headers=bearer("user-1"),
+        json={"text": "x", "source": "s", "course_id": cid},
     )
 
     assert res.status_code == 200

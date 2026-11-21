@@ -26,7 +26,9 @@ class _Pipeline:
         self._ops.append(("expire", args, {}))
 
     async def execute(self):
-        return [await getattr(self._redis, name)(*args, **kwargs) for name, args, kwargs in self._ops]
+        return [
+            await getattr(self._redis, name)(*args, **kwargs) for name, args, kwargs in self._ops
+        ]
 
 
 class FakeRedis:
