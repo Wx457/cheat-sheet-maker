@@ -4,7 +4,7 @@ Access model (see UPGRADE_PLAN 3-2): all tables have RLS enabled with no
 policies, so only this backend — using SUPABASE_SECRET_KEY, which bypasses RLS —
 can read or write them. Because RLS is bypassed, every query here MUST filter by
 the owning user_id; never expose a method that skips that filter.
-(Exception: `list_users`, used only by the offline migration script.)
+Schema: backend/schema.sql.
 
 All methods are synchronous (supabase-py sync client); call them from async code
 via asyncio.to_thread.
@@ -65,10 +65,6 @@ class SupabaseStore:
             .data
         )
         return rows[0]["id"]
-
-    def list_users(self) -> List[Dict[str, Any]]:
-        """仅供离线迁移脚本使用（scripts/migrate_courses.py）：列出所有用户行。"""
-        return self.client.table("users").select("id, clerk_id, anon_id").execute().data
 
     def link_anon_user(self, anon_id: str, clerk_id: str) -> Tuple[str, Dict[str, str]]:
         """把 Phase 2 之前的匿名用户（插件生成的 anon_id）并入 Clerk 用户，只能认领一次。
@@ -284,21 +280,6 @@ class SupabaseStore:
             .execute()
             .data
         )
-
-    def assign_orphans_to_course(self, user_id: str, course_id: str) -> Dict[str, int]:
-        """把该用户没有课程的小抄 / ingest 记录归入 course_id（迁移脚本用，可重复执行）。"""
-        moved: Dict[str, int] = {}
-        for table in ("cheat_sheets", "ingest_batches"):
-            rows = (
-                self.client.table(table)
-                .update({"course_id": course_id})
-                .eq("user_id", user_id)
-                .is_("course_id", "null")
-                .execute()
-                .data
-            )
-            moved[table] = len(rows)
-        return moved
 
     # ── cheat_sheets ─────────────────────────────────────────────────────────
 
